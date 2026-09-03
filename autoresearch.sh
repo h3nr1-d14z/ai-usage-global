@@ -14,7 +14,7 @@
 #   METRIC tokens_scanned / requests_scanned — workload invariants (must not move)
 #   METRIC output_bytes   — document size
 #
-# Correctness gate: tests/validate.py must pass (37 golden invariants) before
+# Correctness gate: validate + fallback + add-key + console suites must pass before
 # any timing is reported. Non-zero exit => checks_failed.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -25,11 +25,14 @@ PY="${PYTHON:-python3}"
 "$PY" tools/make_corpus.py --out bench/corpus >/dev/null
 
 # 2. Correctness gate — fail fast, never emit metrics on a broken engine.
-if ! "$PY" tests/validate.py > bench/last-validation.log 2>&1; then
-  echo "VALIDATION FAILED — see bench/last-validation.log" >&2
-  tail -n 20 bench/last-validation.log >&2 || true
-  exit 1
-fi
+for t in tests/validate.py tests/test_sql_fallback.py tests/test_add_key.py \
+         tests/test_qwen_console.py; do
+  if ! "$PY" "$t" > bench/last-validation.log 2>&1; then
+    echo "VALIDATION FAILED ($t) — see bench/last-validation.log" >&2
+    tail -n 20 bench/last-validation.log >&2 || true
+    exit 1
+  fi
+done
 
 # 3. Timed runs. Warmup absorbs disk-cache and interpreter-startup noise.
 "$PY" bench/run_bench.py --repeats 9 --warmup 3

@@ -138,6 +138,23 @@ def fetch_json(url: str, headers: dict[str, str] | None = None) -> object:
     return json.loads(raw[:MAX_RESPONSE_BYTES].decode("utf-8", errors="replace"))
 
 
+def post_form(url: str, fields: dict[str, str],
+              headers: dict[str, str] | None = None) -> object:
+    """Live transport for form-encoded POSTs. Only reached when
+    AIUSAGE_FIXTURES is unset."""
+    import urllib.request
+    import urllib.parse  # lazy: cold-path only
+    body = urllib.parse.urlencode(fields).encode("utf-8")
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("User-Agent", "h3nr1.d14z-ai-usage/1.0")
+    req.add_header("Accept", "application/json")
+    for key, value in (headers or {}).items():
+        req.add_header(key, value)  # add_header replaces defaults (UA/Accept)
+    with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+        raw = resp.read(MAX_RESPONSE_BYTES + 1)
+    return json.loads(raw[:MAX_RESPONSE_BYTES].decode("utf-8", errors="replace"))
+
+
 def fetch_fixture(provider_id: str, key: str = "main") -> object:
     """Deterministic offline transport: <provider>.<key>.json falling back
     to <provider>.json inside $AIUSAGE_FIXTURES."""
@@ -528,6 +545,174 @@ def fetch_copilot(ctx: dict) -> dict:
                   detail=plan or windows_detail(windows))
 
 
+QWEN_USAGE_API = "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage"
+QWEN_BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/143.0.0.0 Safari/537.36")
+
+
+def _cookie_value(cookie: str, name: str) -> str | None:
+    for seg in cookie.split(";"):
+        k, sep, v = seg.partition("=")
+        if sep and k.strip() == name and v.strip():
+            return v.strip()
+    return None
+
+
+def _used_fraction(value) -> float | None:
+    n = finite(value, -1.0)
+    if n < 0:
+        return None
+    if n > 1:
+        n /= 100.0
+    return min(1.0, n)
+
+
+def _epoch_ms(value) -> int | None:
+    n = finite(value, -1.0)
+    if n <= 0:
+        return None
+    return int(n * 1000) if n < 1e12 else int(n)
+
+
+def qwen_credential(ctx: dict) -> tuple[str, bool] | None:
+    """(cookie, is_china) for the console usage API. Precedence: env
+    QWEN_PLAN_COOKIE (international) → OMP agent store auto-detect (its
+    alibaba-token-plan credential embeds the browser cookie; baseUrl marks
+    the China region). None → local census fallback."""
+    cookie = _ENV.get("QWEN_PLAN_COOKIE", "").strip()
+    if cookie:
+        return cookie, False
+    db = ctx["home"] / ".omp/agent/agent.db"
+    if not db.is_file():
+        return None
+    import sqlite3  # lazy: only when an OMP store exists
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
+        try:
+            row = conn.execute(
+                "SELECT data FROM auth_credentials"
+                " WHERE provider='alibaba-token-plan'"
+                " ORDER BY updated_at DESC LIMIT 1").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    if not row or not isinstance(row[0], str):
+        return None
+    try:
+        outer = json.loads(row[0])
+        inner = outer.get("key") if isinstance(outer, dict) else None
+        if not isinstance(inner, str) or not inner.startswith("{"):
+            return None  # bare sk- key: OMP holds no cookie for it
+        cred = json.loads(inner)
+        cookie = cred.get("cookie")
+        if not isinstance(cookie, str) or not cookie.strip():
+            return None
+        base = cred.get("baseUrl") or ""
+        return cookie.strip(), isinstance(base, str) and "cn-beijing" in base
+    except ValueError:
+        return None
+
+
+def fetch_qwen_console(cookie: str, is_china: bool) -> list[dict] | None:
+    """Real 5h/7d credit percentages via the console gateway — the flow OMP
+    ships (port of pi-ai/src/usage/alibaba-token-plan.ts). The cookie is a
+    browser session credential: used for the two requests, NEVER stored in
+    the emitted document. Any failure → None → census fallback."""
+    import re as _re
+    import uuid
+    from urllib.parse import quote
+    if is_china:
+        origin = "https://bailian.console.aliyun.com"
+        session_url = origin + "/cn-beijing?tab=plan"
+        action, region = "BroadScopeAspnGateway", "cn-beijing"
+        usage_url = ("https://bailian-cs.console.aliyun.com/data/api.json?action="
+                     + action + "&product=sfm_bailian&api=" + quote(QWEN_USAGE_API))
+        cornerstone = {"feTraceId": str(uuid.uuid4()),
+                       "feURL": session_url + "#/efm/subscription/token-plan/personal",
+                       "protocol": "V2", "console": "ONE_CONSOLE",
+                       "productCode": "p_efm", "switchAgent": 12608464,
+                       "switchUserType": 3, "domain": "bailian.console.aliyun.com",
+                       "consoleSite": "BAILIAN_ALIYUN", "userNickName": "",
+                       "userPrincipalName": "", "xsp_lang": "zh-CN"}
+    else:
+        origin = "https://home.qwencloud.com"
+        session_url = origin + "/tool/user/info.json"
+        action, region = "IntlBroadScopeAspnGateway", "ap-southeast-1"
+        usage_url = ("https://cs-data.qwencloud.com/data/api.json?product=sfm_bailian&action="
+                     + action + "&api=" + quote(QWEN_USAGE_API))
+        cornerstone = {"domain": "home.qwencloud.com", "consoleSite": "QWENCLOUD",
+                       "console": "ONE_CONSOLE", "xsp_lang": "en-US",
+                       "protocol": "V2", "productCode": "p_efm"}
+
+    hdr = {"Cookie": cookie, "User-Agent": QWEN_BROWSER_UA, "Referer": origin + "/"}
+    if _FIXTURES_DIR:
+        session = fetch_fixture("qwen", "session")
+    elif is_china:
+        import urllib.request
+        req = urllib.request.Request(session_url)
+        for k, v in hdr.items():
+            req.add_header(k, v)
+        with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+            html = resp.read(4 * MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
+        m = _re.search(r'\bSEC_TOKEN\s*:\s*"([^"]+)"', html)
+        if not m:
+            return None
+        session = {"data": {"secToken": m.group(1)}}
+    else:
+        session = fetch_json(session_url, hdr)
+    if not isinstance(session, dict) or not isinstance(session.get("data"), dict):
+        return None
+    sec_token = session["data"].get("secToken")
+    if not isinstance(sec_token, str) or not sec_token:
+        return None
+
+    csrf = _cookie_value(cookie, "login_aliyunid_csrf") or _cookie_value(cookie, "csrf")
+    post_hdr = {"Cookie": cookie, "User-Agent": QWEN_BROWSER_UA,
+                "Origin": origin, "Referer": session_url,
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "application/json, text/plain, */*"}
+    if csrf:
+        post_hdr["x-xsrf-token"] = csrf
+        post_hdr["x-csrf-token"] = csrf
+    fields = {"product": "sfm_bailian", "action": action, "region": region,
+              "sec_token": sec_token,
+              "params": json.dumps({"Api": QWEN_USAGE_API,
+                                    "Data": {"cornerstoneParam": cornerstone},
+                                    "V": "1.0"})}
+    payload = fetch_fixture("qwen", "usage") if _FIXTURES_DIR else \
+        post_form(usage_url, fields, post_hdr)
+    if not isinstance(payload, dict) or payload.get("successResponse") is False:
+        return None
+    node = payload.get("data")
+    if not isinstance(node, dict):
+        return None
+    # Gateway envelope: {"Data": "<json string>"} | {"DataV2": {data}} | {data}
+    if isinstance(node.get("Data"), str):
+        try:
+            parsed = json.loads(node["Data"])
+            if isinstance(parsed, dict):
+                node = parsed
+        except ValueError:
+            pass
+    dv2 = node.get("DataV2")
+    if isinstance(dv2, dict) and isinstance(dv2.get("data"), dict):
+        node = dv2["data"]
+    elif isinstance(node.get("data"), dict):
+        node = node["data"]
+    f5 = _used_fraction(node.get("per5HourPercentage"))
+    fw = _used_fraction(node.get("per1WeekPercentage"))
+    windows = []
+    if f5 is not None:
+        windows.append(window("rolling", "5h", H5, percent=f5 * 100.0,
+                              resets_at_ms=_epoch_ms(node.get("per5HourResetTime"))))
+    if fw is not None:
+        windows.append(window("weekly", "W", WEEK, percent=fw * 100.0,
+                              resets_at_ms=_epoch_ms(node.get("per1WeekResetTime"))))
+    return windows or None
+
+
 def fetch_qwen(ctx: dict) -> dict:
     """Alibaba Cloud Model Studio Coding Plan (Qwen token plan).
 
@@ -542,6 +727,22 @@ def fetch_qwen(ctx: dict) -> dict:
     cap5 = max(1, int(finite(caps.get("qwenPlanCap5h"), 6000)))
     capw = max(1, int(finite(caps.get("qwenPlanCapWeek"), 45000)))
     capm = max(1, int(finite(caps.get("qwenPlanCapMonth"), 90000)))
+    # Console gateway first (real percentages, resets) when a session cookie
+    # is available; the local census below is the no-cookie fallback.
+    cred = qwen_credential(ctx)
+    if cred is not None:
+        try:
+            wins = fetch_qwen_console(cred[0], cred[1])
+        except Exception:  # noqa: BLE001 — console is best-effort
+            wins = None
+        if wins:
+            headline = percent_headline(wins)
+            detail = "console · " + " · ".join(
+                f"{w['label']} {w['percent'] if w['percent'] is not None else '—'}%"
+                for w in wins)
+            return record(p, configured=True, kind="percent",
+                          label=f"{round(headline)}%" if headline is not None else "—",
+                          value=headline, windows=wins, detail=detail)
     root = ctx["home"] / ".qwen/projects"
     if not root.is_dir():
         return record(p, error="no-local-store")
@@ -628,7 +829,8 @@ PROVIDERS = [
      "keyEnv": "DEEPSEEK_API_KEY"},
     {"id": "copilot", "name": "GitHub Copilot", "display": "CP",
      "keyEnv": "GITHUB_TOKEN"},
-    {"id": "qwen", "name": "Qwen Coding Plan", "display": "AB", "keyEnv": ""},
+    {"id": "qwen", "name": "Qwen Coding Plan", "display": "AB",
+     "keyEnv": "QWEN_PLAN_COOKIE"},
 ]
 
 
@@ -1067,11 +1269,15 @@ def add_key(name: str, value: str) -> dict:
         path.parent.mkdir(parents=True, exist_ok=True)
         lines = []
         if path.is_file():
+            # Line-based merge: drop only the replaced assignment; comments,
+            # blanks and ordering are the user's and stay verbatim.
             lines = [l for l in path.read_text(encoding="utf-8").splitlines()
-                     if "=" in l and l.split("=", 1)[0].strip() != name]
+                     if l.split("=", 1)[0].strip() != name]
         lines.append(f"{name}={value}")
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        os.chmod(path, 0o600)
+        tmp_path = path.parent / (path.name + ".tmp")
+        tmp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, path)  # atomic: bad input can never truncate
     except OSError as exc:
         return {"ok": False, "error": safe_error(exc)}
     return {"ok": True, "file": str(path)}

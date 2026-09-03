@@ -51,6 +51,8 @@ def main() -> int:
         "TZ": "UTC",  # corpus day goldens are UTC-pinned
         "PYTHONDONTWRITEBYTECODE": "1",
     })
+    # census path must own the corpus runs (console branch = test_qwen_console)
+    env.pop("QWEN_PLAN_COOKIE", None)
     cmd = [sys.executable, str(ROOT / "engine/usage.py"),
            "--settings", str(ROOT / "bench/settings.json")]
 

@@ -69,6 +69,10 @@ def main() -> int:
         "PYTHONDONTWRITEBYTECODE": "1",
         "TZ": "UTC",
     })
+    # An ambient QWEN_PLAN_COOKIE in the developer's shell would flip the
+    # corpus qwen record from census to console mode and break the count
+    # checks — the console branch belongs to test_qwen_console.py only.
+    env.pop("QWEN_PLAN_COOKIE", None)
 
     def run_engine() -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -107,7 +111,7 @@ def main() -> int:
         "opencode": "OPENCODE_GO_API_KEY", "openrouter": "OPENROUTER_API_KEY",
         "kimi": "KIMI_API_KEY", "zai": "ZAI_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY", "copilot": "GITHUB_TOKEN",
-        "qwen": ""}, str(keyenv))
+        "qwen": "QWEN_PLAN_COOKIE"}, str(keyenv))
     iso_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
     windows_ok = all(
         (w["percent"] is None or 0 <= w["percent"] <= 999)

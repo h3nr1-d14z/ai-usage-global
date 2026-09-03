@@ -59,18 +59,32 @@ Easiest: open the panel and paste the key into the provider's own row (the
 Save button stores it into `~/.config/ai-usage/env` with 0600 perms — the
 value travels over stdin, never argv). CLI equivalent:
 `mkdir -p ~/.config/ai-usage && printf 'OPENROUTER_API_KEY=sk-or-…\n' >> ~/.config/ai-usage/env`.
+Note the engine's own store (`~/.config/ai-usage/env`) is the **lowest**
+precedence — a real environment variable always wins over a paste made in
+the panel.
 
-### Qwen / Alibaba Coding Plan — honest note
+### Qwen / Alibaba Coding Plan
 
-There is **no public usage API** for Coding Plan (`sk-sp-*`) keys: every
-`dashscope…/api/v1/usage|quota` path 404s and the console gateway needs a
-browser session (independently confirmed in [`steipete/CodexBar#612`]). So this
-plugin computes the plan's three windows **locally**, by counting requests in
-`~/.qwen/projects/*/chats/*.jsonl` against the plan caps — the same unit the
-official console dashboard shows. Caps default to Pro (6 000 req / 5 h,
-45 000 / week, 90 000 / month) and are editable in the widget settings.
+The plan has **no public usage API** for `sk-sp-*` keys (every
+`dashscope…/api/v1/usage|quota` path 404s — confirmed in
+[`steipete/CodexBar#612`]), but the console gateway works with a browser
+session cookie, and that is what the widget uses when available:
 
-If you want a real live meter for it, the fix has to come from Alibaba.
+1. **Console mode (preferred)** — real 5h/7d credit percentages + reset
+   times via the same `api.json` gateway the QwenCloud/Bailian web dashboard
+   calls (protocol ported from [OMP](https://github.com/can1350/omp)'s
+   `alibaba-token-plan` usage provider). The cookie is picked up **automatically**
+   if you are logged into the plan with OMP (`~/.omp/agent/agent.db` →
+   `auth_credentials`); otherwise paste it into the Qwen row's key field
+   (stored as `QWEN_PLAN_COOKIE`). Get it from the dashboard's DevTools →
+   any request → `cookie:` header. Session cookies expire — when the gateway
+   stops answering, the widget silently falls back to (2).
+2. **Local census (fallback)** — counts requests in
+   `~/.qwen/projects/*/chats/*.jsonl` against the plan caps (default Pro:
+   6 000 req / 5 h, 45 000 / week, 90 000 / month, editable in settings).
+
+The cookie is a session credential: it is used for the two gateway requests
+and never written to the emitted document or logs (asserted by tests).
 
 ## Settings (`omarchy bar set h3nr1.d14z.ai-usage <key> <value>`)
 

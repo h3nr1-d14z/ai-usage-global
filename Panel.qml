@@ -655,29 +655,49 @@ Panel {
       visible: !block.p.configured && (block.p.keyEnv || "") !== ""
       width: parent.width
       spacing: Style.space(6)
-      TextField {
+      Rectangle {
         id: keyField
         width: parent.width - saveKey.width - Style.space(12)
-        placeholderText: "paste " + (block.p.keyEnv || "")
-        echoMode: TextInput.Password
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        selectByMouse: true
-        onAccepted: if (text.length > 0) root.addKey(block.p.keyEnv, text)
+        height: keyInput.implicitHeight + Style.space(12)
+        radius: Style.cornerRadius
+        color: root.alpha(root.foreground, 0.06)
+        border.color: keyInput.activeFocus ? root.accent : "transparent"
+        border.width: 1
+        TextInput {
+          id: keyInput
+          anchors.left: parent.left; anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.leftMargin: Style.space(8); anchors.rightMargin: Style.space(8)
+          clip: true
+          text: ""
+          placeholderText: "paste " + (block.p.keyEnv || "")
+          echoMode: TextInput.Password
+          color: root.foreground
+          selectedTextColor: root.foreground
+          selectionColor: root.alpha(root.accent, 0.4)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          selectByMouse: true
+          // The PanelKeyCatcher grabs focus on open; take ours back on click.
+          MouseArea { anchors.fill: parent; cursorShape: Qt.IBeamCursor;
+                      onClicked: keyInput.forceActiveFocus() }
+          onAccepted: if (text.length > 0) {
+            root.addKey(block.p.keyEnv, text); text = ""
+          }
+        }
       }
       Rectangle {
         id: saveKey
         width: saveKeyLabel.implicitWidth + Style.space(14)
         height: keyField.height
         radius: Style.cornerRadius
-        color: keyField.text.length > 0 ? root.accent : root.alpha(root.foreground, 0.08)
+        color: keyInput.text.length > 0 ? root.accent : root.alpha(root.foreground, 0.08)
         Text {
           id: saveKeyLabel
           anchors.centerIn: parent
           text: root.keyAddPending === block.p.keyEnv && keyAdder.running
                 ? "saving…" : "Save"
-          color: keyField.text.length > 0 ? "#111111" : root.dim
+          color: keyInput.text.length > 0 ? "#111111" : root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           font.bold: true
@@ -685,9 +705,9 @@ Panel {
         MouseArea {
           anchors.fill: parent
           cursorShape: Qt.PointingHandCursor
-          onClicked: if (keyField.text.length > 0) {
-            root.addKey(block.p.keyEnv, keyField.text)
-            keyField.text = ""
+          onClicked: if (keyInput.text.length > 0) {
+            root.addKey(block.p.keyEnv, keyInput.text)
+            keyInput.text = ""
           }
         }
       }
