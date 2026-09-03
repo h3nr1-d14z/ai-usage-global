@@ -75,7 +75,8 @@ bash autoresearch.sh        # corpus → 4 test suites → 9 timed runs
   flow, agent.db auto-detect, newest-row-wins both directions, China
   DataV2, numeric-string + ISO resets, secrets-absent, failure→census.
 - `bench/run_bench.py` — median engine_ms + workload invariants
-  (tokens/requests scanned must not move). Baseline on this M1: ~142 ms.
+  (tokens/requests scanned must not move). Baselines: M1 ~142 ms;
+  Ryzen 7 5800H Linux ~190 ms median, 182–198 spread, planes ~128 ms.
   Note: `output_bytes` carries ±1 byte of inherent noise — the engine
   embeds its own `timings.totalMs` (0.1 ms resolution) in the document,
   so the digit before the decimal can shift run to run. Proven
@@ -92,11 +93,47 @@ bash autoresearch.sh        # corpus → 4 test suites → 9 timed runs
 git clone https://github.com/h3nr1-d14z/ai-usage-global.git \
   ~/.config/omarchy/plugins/h3nr1.d14z.ai-usage
 omarchy plugin enable h3nr1.d14z.ai-usage   # if not auto-enabled
-omarchy-shell shell rescanPlugins           # if not listed
+omarchy restart shell                   # apply plugin QML (hot-reload is unreliable)
 ```
 
 No symlinks allowed in the plugin folder; keep `manifest.json`
 `entryPoints.barWidget = Panel.qml` as-is.
+
+## Linux verification — 2026-09-04 (Omarchy machine)
+
+Checklist executed end-to-end; everything below is live-verified.
+
+- Gate: 4× PASS, `engine_ms` ~190 median (see baselines above). Workload
+  invariants byte-identical: 31,340 requests / 1.01B tokens / 6,483 B.
+  `qmllint` not installed there (optional item, skipped); `omarchy plugin
+  validate` exits 0.
+- Bar chip renders `AB W 42%`; `qs log` clean (the wrangler WARNs belong
+  to another plugin).
+- **Qwen row bug found & fixed** (`df9ba17`): the live international
+  gateway nests usage one level deeper than any pinned envelope —
+  `data.DataV2.data.data.{per…}` (dv2.data is a msg/code envelope). The
+  ported parse stopped at `DataV2.data`, so every field read None →
+  silent census fallback → `no-local-store` without `~/.qwen` transcripts.
+  Fix mirrors OMP's `X8r`: the final `.data` descent is unconditional
+  (`elif` → `if`). This account also returns ONLY the week window, as a
+  fraction (0.417 → 41.7%) — both shapes pinned (suite now 17 checks).
+  Live record: `console · W 41.7%`, reset 2026-09-07T05:35Z, via the
+  agent.db cookie auto-detect (row shape `{"token","cookie"}`, no
+  baseUrl → international).
+- **Key-input UX** (user direction: keep keys manual, improve the input
+  tab): clipboard paste (`wl-paste`, strips a leading `cookie:`),
+  show/hide mask toggle, per-provider hint lines, paste rows that stay
+  reachable once a provider is configured (`shownProviders` used to hide
+  every unconfigured provider the moment one lit up), and a census-mode
+  qwen re-offers its row with a "showing local counts" hint. Panel height
+  fits content now (the old 640px cap clipped the 7-block list).
+- **Deploy caveat**: plugin hot-reload logs "Local plugin changed,
+  reloading" but does NOT re-instantiate the QML component — engine
+  changes apply immediately (fresh subprocess per refresh), QML changes
+  do not; `omarchy-shell shell rescanPlugins` is a no-op for changed
+  files. Apply QML changes with `omarchy restart shell`.
+- IPC: `qs -p "$OMARCHY_PATH/shell" ipc call h3nr1.d14z.ai-usage
+  refresh|open|close` (all exercised during verification).
 
 ## Verification checklist (do these in order)
 
@@ -118,8 +155,17 @@ No symlinks allowed in the plugin folder; keep `manifest.json`
 - **Console = 5h + 7d only** (the API has no monthly). Census monthly
   is intentionally *not* spliced into a console record. If Alibaba ships
   a monthly field, extend `fetch_qwen_console`.
-- **Session cookies expire** — the gateway 401s silently fall back to
-  census; a "cookie stale" badge in the panel would be nice-to-have.
+- **Session cookies expire** — handled: a configured qwen that falls back
+  to census re-offers its paste row with a "showing local counts" hint.
+- **First refresh after shell start**: the engine runs only on the
+  refresh-interval timer (900s default) or panel-open, so the bar reads
+  `AI —` for up to 15 min after login/restart. Left alone on purpose (no
+  unrequested automatic behaviour); `Component.onCompleted: refresh()`
+  would close it if ever wanted.
+- **OMP agent.db holds more credentials than the engine uses** (e.g.
+  `opencode-go` keys on this machine). Auto-detecting them was proposed
+  and declined: keys are pasted manually by design; the Qwen cookie
+  auto-detect stays the single exception.
 - **Census refinement idea (parked, do NOT do casually)**: newer Qwen
   CLIs write per-session aggregates to `~/.qwen/usage_record.jsonl`.
   Mixing them with the chats/*.jsonl line count risks double-counting,
@@ -138,5 +184,7 @@ No symlinks allowed in the plugin folder; keep `manifest.json`
 `fea0fb4` initial plugin → `37ef141`/`95b091b` review fixes + cost oracle
 → `0c20a33` nested-JSON hardening → `b9f9b5a` panel crash fix + in-panel
 keys → `cfbcd23` Qwen console meter + test suites → `6935902` reset-time
-dedup + ISO coverage → this commit (numeric-string resets, docstrings,
-gate log, handoff).
+dedup + ISO coverage → numeric-string resets, docstrings, gate log,
+handoff → `28608d0` placeholderText fix → `df9ba17` live-intl
+`DataV2.data.data` unwrap → `18cc1df`/`2650ac7`/`b9eb6dd` key-input UX +
+panel fit → this commit (Linux verification record).
