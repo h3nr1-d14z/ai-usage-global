@@ -1,0 +1,6 @@
+{
+  "qwenPlanCap5h": 6000,
+  "qwenPlanCapWeek": 45000,
+  "qwenPlanCapMonth": 90000,
+  "showLocalConsumption": true
+}

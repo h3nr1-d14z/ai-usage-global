@@ -1,0 +1,13 @@
+# Generated benchmark corpus — seeded, regenerates via tools/make_corpus.py
+bench/corpus/
+bench/last-validation.log
+
+# Reference clones (survey material, not plugin source)
+.scratch/
+
+# Python
+__pycache__/
+*.pyc
+
+# Plugin assets under construction
+preview.png

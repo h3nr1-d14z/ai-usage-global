@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "h3nr1.d14z.ai-usage",
+  "name": "AI Usage Global",
+  "version": "0.1.0",
+  "author": "h3nr1.d14z",
+  "license": "MIT",
+  "description": "Multi-provider AI subscription usage in the Omarchy bar: live quota meters (OpenCode Go, OpenRouter, Kimi, ZAI, DeepSeek, Copilot, Qwen Coding Plan) plus local token consumption scanned from your own agent transcripts — models, use-rate and reset countdowns included.",
+  "kinds": ["bar-widget"],
+  "activation": "on-demand",
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "AI Usage Global",
+    "description": "Subscription meters + local token consumption for many providers. Click: panel. Right/middle: refresh.",
+    "category": "AI",
+    "aliases": ["ai-usage", "qwen-coding-plan", "subscription-usage"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 900,
+      "barDisplay": "Data",
+      "defaultProvider": "opencode",
+      "showLocalConsumption": true,
+      "qwenPlanCap5h": 6000,
+      "qwenPlanCapWeek": 45000,
+      "qwenPlanCapMonth": 90000
+    },
+    "schema": [
+      { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh interval (seconds)", "min": 60, "max": 3600, "step": 30, "defaultValue": 900 },
+      { "key": "barDisplay", "type": "enum", "label": "Bar display", "options": ["Icon", "Data"], "defaultValue": "Data", "description": "Icon shows a compact chip; Data shows the default provider's headline line." },
+      { "key": "defaultProvider", "type": "enum", "label": "Default provider (Data mode)", "options": ["opencode", "openrouter", "kimi", "zai", "deepseek", "copilot", "qwen", "claude", "codex"], "defaultValue": "opencode" },
+      { "key": "showLocalConsumption", "type": "enum", "label": "Local token consumption", "options": ["On", "Off"], "defaultValue": "On", "description": "Scan local agent stores (OpenCode DB, Claude/Codex/Qwen/OMP transcripts) for per-model token usage. Read-only." },
+      { "key": "qwenPlanCap5h", "type": "integer", "label": "Qwen plan: requests / 5h", "min": 100, "max": 100000, "step": 100, "defaultValue": 6000 },
+      { "key": "qwenPlanCapWeek", "type": "integer", "label": "Qwen plan: requests / week", "min": 100, "max": 500000, "step": 500, "defaultValue": 45000 },
+      { "key": "qwenPlanCapMonth", "type": "integer", "label": "Qwen plan: requests / month", "min": 100, "max": 1000000, "step": 500, "defaultValue": 90000 }
+    ]
+  }
+}
