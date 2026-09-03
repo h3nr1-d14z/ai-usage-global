@@ -127,9 +127,11 @@ def main() -> int:
                       {"data": {"Data": json.dumps(usage_body(
                           42.5, 71.25, NOW_MS + 3600_000, NOW_MS + 2 * 86400_000))}})
         chn_fix = tmp / "fx-chn"
+        # China gateway answers reset times as ISO strings, not epoch —
+        # parse_ts_ms must accept both (shared with the transcript census).
         make_fixtures(chn_fix, {"data": {"secToken": "SECTOK2"}},
                       {"data": {"DataV2": {"data": usage_body(
-                          10, 20, NOW_MS + 1000, NOW_MS + 2000)}}})
+                          10, 20, "2026-09-03T12:00:01Z", "2026-09-03T12:00:02Z")}}})
 
         # 1) env cookie → international console flow ------------------------- #
         doc = run_engine(make_home(tmp / "h-intl"),
@@ -173,6 +175,9 @@ def main() -> int:
         w = wins_of(qwen_of(doc))
         check("china: DataV2 unwrapped 5h", w.get("rolling", {}).get("percent") == 10.0, str(w))
         check("china: DataV2 weekly", w.get("weekly", {}).get("percent") == 20.0, str(w))
+        check("china: ISO reset parsed",
+              w.get("rolling", {}).get("resetsAt") == "2026-09-03T12:00:01Z",
+              str(w.get("rolling")))
 
         # 5) console failure → census fallback, exact counts ----------------- #
         bad_fix = tmp / "fx-bad"

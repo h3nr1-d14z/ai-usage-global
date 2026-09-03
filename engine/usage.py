@@ -568,13 +568,6 @@ def _used_fraction(value) -> float | None:
     return min(1.0, n)
 
 
-def _epoch_ms(value) -> int | None:
-    n = finite(value, -1.0)
-    if n <= 0:
-        return None
-    return int(n * 1000) if n < 1e12 else int(n)
-
-
 def qwen_credential(ctx: dict) -> tuple[str, bool] | None:
     """(cookie, is_china) for the console usage API. Precedence: env
     QWEN_PLAN_COOKIE (international) → OMP agent store auto-detect (its
@@ -706,10 +699,10 @@ def fetch_qwen_console(cookie: str, is_china: bool) -> list[dict] | None:
     windows = []
     if f5 is not None:
         windows.append(window("rolling", "5h", H5, percent=f5 * 100.0,
-                              resets_at_ms=_epoch_ms(node.get("per5HourResetTime"))))
+                              resets_at_ms=parse_ts_ms(node.get("per5HourResetTime"))))
     if fw is not None:
         windows.append(window("weekly", "W", WEEK, percent=fw * 100.0,
-                              resets_at_ms=_epoch_ms(node.get("per1WeekResetTime"))))
+                              resets_at_ms=parse_ts_ms(node.get("per1WeekResetTime"))))
     return windows or None
 
 
@@ -1255,9 +1248,10 @@ def build_document(settings: dict) -> dict:
 
 
 def add_key(name: str, value: str) -> dict:
-    """Merge one KEY=value into ~/.config/ai-usage/env (0600). The value
-    arrives via stdin — argv would be visible in `ps`. Never echoes the
-    value back in the result."""
+    """Merge one KEY=value into ~/.config/ai-usage/env (0600): removes the
+    old assignment line and appends the new one at the end, preserving
+    comments and other keys. The value arrives via stdin — argv would be
+    visible in `ps`. Never echoes the value back in the result."""
     import re
     if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,64}", name):
         return {"ok": False, "error": "invalid key name"}
