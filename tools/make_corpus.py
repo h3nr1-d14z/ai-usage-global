@@ -26,22 +26,19 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import os
 import random
 import shutil
 import sqlite3
 import sys
-import time
 from pathlib import Path
 
-# Day buckets are host-local by design (engine matches user wall clocks);
-# pin the corpus to UTC so expectations don't drift between the machine
-# that generated them and the one that validates. validate.py/run_bench.py
-# pass TZ=UTC to the engine, so both sides agree.
-os.environ["TZ"] = "UTC"
-time.tzset()
+# Day buckets are host-local for the USER (engine matches wall clocks), but
+# the corpus is UTC-pinned: all date math here is tz-aware UTC, and
+# validate.py/run_bench.py pass TZ=UTC to the engine subprocess. No
+# os.environ/tzset games — nothing can be silently overridden by the shell.
+UTC = dt.timezone.utc
 
-CORPUS_VERSION = 5  # v5: qwen traffic spans 38d (month-boundary exercised)
+CORPUS_VERSION = 6  # v6: cost = embedded-only (claude/codex/qwen -> 0.0)
 
 # Fixed anchor: 2026-09-03T12:00:00Z. Pinned so window math is reproducible.
 FIXED_NOW_MS = int(dt.datetime(2026, 9, 3, 12, 0, 0, tzinfo=dt.timezone.utc)
@@ -112,9 +109,9 @@ class Expect:
 
     def __init__(self):
         self.models: dict[str, dict] = {}
-        # 7 local midnights ending at FIXED_NOW's midnight — mirrors the
-        # engine's DayIndex, so day buckets can be pinned exactly.
-        midnight = dt.datetime.fromtimestamp(FIXED_NOW_MS / 1000.0).replace(
+        # 7 UTC midnights ending at FIXED_NOW's midnight — mirrors the
+        # engine's DayIndex under TZ=UTC, so day buckets pin exactly.
+        midnight = dt.datetime.fromtimestamp(FIXED_NOW_MS / 1000.0, UTC).replace(
             hour=0, minute=0, second=0, microsecond=0)
         self.day_dates = [(midnight - dt.timedelta(days=6 - i)).strftime("%Y-%m-%d")
                           for i in range(7)]
@@ -123,12 +120,15 @@ class Expect:
         self.day_requests = {d: 0 for d in self.day_dates}
 
     def add_day(self, ms: int, total_tokens: int) -> None:
-        d = dt.datetime.fromtimestamp(ms / 1000.0).strftime("%Y-%m-%d")
+        d = dt.datetime.fromtimestamp(ms / 1000.0, UTC).strftime("%Y-%m-%d")
         if d in self.day_set:
             self.day_tokens[d] += total_tokens
             self.day_requests[d] += 1
 
     def add(self, model: str, t: dict, cost: float) -> None:
+        """`cost` must be what the STORE embeds (opencode/omp rows) or 0.0
+        (transcript formats with no per-request cost) — never a computed
+        estimate the engine has no field to read."""
         b = self.models.setdefault(model, {
             "inputTokens": 0, "outputTokens": 0, "cacheReadTokens": 0,
             "cacheWriteTokens": 0, "reasoningTokens": 0, "requests": 0, "cost": 0.0})
@@ -138,7 +138,7 @@ class Expect:
         b["cacheWriteTokens"] += t["cacheWrite"]
         b["reasoningTokens"] += t["reasoning"]
         b["requests"] += 1
-        b["cost"] = round(b["cost"] + cost, 6)
+        b["cost"] += cost
 
     @property
     def total_tokens(self) -> int:
@@ -168,8 +168,9 @@ def write_claude(home: Path, rng: random.Random, expect: Expect) -> dict:
                 model = models[(proj_index + session + i) % len(models)]
                 t = tokens_for(model, rng)
                 ms = FIXED_NOW_MS - rng.randrange(0, 30 * DAY_MS)
-                cost = cost_for(model, t)
-                expect.add(model, t, cost)
+                # Real Claude Code assistant lines embed no cost (verified
+                # against v2.1.251 stores) — Expect must mirror the store.
+                expect.add(model, t, 0.0)
                 expect.add_day(ms, t["input"] + t["output"] + t["cacheRead"]
                                + t["cacheWrite"] + t["reasoning"])
                 n += 1
@@ -212,8 +213,7 @@ def write_codex(home: Path, rng: random.Random, expect: Expect) -> dict:
             model = models[(session + i) % len(models)]
             t = tokens_for(model, rng)
             ms = FIXED_NOW_MS - rng.randrange(0, 30 * DAY_MS)
-            cost = cost_for(model, t)
-            expect.add(model, t, cost)
+            expect.add(model, t, 0.0)  # codex transcripts carry no cost
             expect.add_day(ms, t["input"] + t["output"] + t["cacheRead"]
                            + t["cacheWrite"] + t["reasoning"])
             n += 1
@@ -263,8 +263,7 @@ def write_qwen(home: Path, rng: random.Random, expect: Expect) -> dict:
                     ms = FIXED_NOW_MS - rng.randrange(0, 4 * H5_MS)
                 else:
                     ms = FIXED_NOW_MS - rng.randrange(0, 38 * DAY_MS)
-                cost = cost_for(model, t)
-                expect.add(model, t, cost)
+                expect.add(model, t, 0.0)  # qwen transcripts carry no cost
                 n += 1
                 total = (t["input"] + t["output"] + t["cacheRead"] + t["reasoning"])
                 expect.add_day(ms, total + t["cacheWrite"])
@@ -513,13 +512,18 @@ def main() -> int:
     write_credentials(home)
     write_fixtures(out)
 
+    # Round per-model cost ONCE at emit — the engine rounds once in
+    # merge_local; per-add rounding here would be the only divergence left.
+    models_out = {m: dict(b, cost=round(b["cost"], 6))
+                  for m, b in expect.models.items()}
     manifest = {
         "version": CORPUS_VERSION,
         "seed": args.seed,
+        "tz": "UTC",  # day goldens are tz-aware UTC (see header)
         "nowMs": FIXED_NOW_MS,
         "opencodeRows": args.opencode_rows,
         "expected": {
-            "models": expect.models,
+            "models": models_out,
             "totalTokens": expect.total_tokens,
             "totalRequests": expect.total_requests,
             "recentDays": [{"date": d, "tokens": expect.day_tokens[d],

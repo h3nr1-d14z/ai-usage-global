@@ -30,15 +30,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-import time
+UTC = dt.timezone.utc
 
 ROOT = Path(__file__).resolve().parent.parent
 CORPUS = ROOT / "bench/corpus"
 
-# Pin local date math to UTC (see tools/make_corpus.py); the engine inherits
-# TZ via the env below, so day goldens are timezone-independent.
-os.environ["TZ"] = "UTC"
-time.tzset()
+# All date math here is tz-aware UTC (no os.environ/tzset games — nothing
+# the calling shell can silently override). The engine's DayIndex is
+# host-local BY DESIGN (user wall clocks), so its subprocess gets TZ=UTC
+# below to agree with the UTC-pinned goldens.
 
 FAILURES: list[str] = []
 
@@ -155,6 +155,14 @@ def main() -> int:
               f'{qww.get("rolling")} vs {plan}')
         check("qwen week count exact", qww.get("weekly", {}).get("used") == plan["week"])
         check("qwen month count exact", qww.get("monthly", {}).get("used") == plan["month"])
+        # Self-documenting boundary coverage: the corpus MUST contain qwen
+        # requests past the 30-day month cap, or the month<total inequality
+        # (and hence the census boundary fix) silently loses its trap.
+        qwen_total = next((s["requests"] for s in corpus["expected"]["sources"]
+                           if s.get("source") == "qwen"), 0)
+        check("qwen month boundary exercised",
+              0 < plan["month"] < qwen_total,
+              f'month={plan["month"]} total={qwen_total} — no >30d rows?')
 
     # ---- consumption vs corpus manifest (EXACT) ------------------------------ #
     expected = corpus["expected"]
@@ -208,7 +216,7 @@ def main() -> int:
     check("weekTokens == sum(recentDays)", local.get("weekTokens") == week_sum,
           f'{local.get("weekTokens")} vs {week_sum}')
     check("week <= total", week_sum <= expected["totalTokens"])
-    today = dt.datetime.fromtimestamp(now_ms / 1000.0).strftime("%Y-%m-%d")
+    today = dt.datetime.fromtimestamp(now_ms / 1000.0, UTC).strftime("%Y-%m-%d")
     today_row = next((d for d in days if d["date"] == today), None)
     check("today coherent", today_row is not None
           and local.get("todayTokens") == today_row["tokens"]

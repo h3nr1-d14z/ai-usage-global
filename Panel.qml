@@ -166,9 +166,10 @@ Panel {
           var data = JSON.parse(output)
           root.providers = data.providers || []
           root.local = data.local || {}
-          // no-key/no-token/no-local-store are expected states for
-          // unconfigured providers; only real fetch failures get the banner.
-          var benign = ["no-key", "no-token", "no-local-store"]
+          // no-key/no-token/no-local-store/no-local-usage are expected
+          // states for unconfigured providers; only real fetch failures
+          // get the banner.
+          var benign = ["no-key", "no-token", "no-local-store", "no-local-usage"]
           var real = (data.errors || []).filter(function (e) { return benign.indexOf(e) < 0 })
           root.errorText = real.length ? "some providers failed" : ""
         } catch (e) {

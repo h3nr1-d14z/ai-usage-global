@@ -101,11 +101,13 @@ def round_up(value: float, digits: int = 1) -> float:
 
 def safe_error(exc: Exception) -> str:
     """Transport errors surface in the panel; never let a bearer token or
-    key-shaped substring ride along in an exception message."""
+    key-shaped substring ride along in an exception message. Redact FIRST,
+    then truncate — truncating first could cut mid-token and defeat the
+    pattern, leaking the token's tail."""
     import re
-    text = str(exc)[:120]
-    return re.sub(r"(gho_|sk-|Bearer\s+|token[=:\"']+)[A-Za-z0-9_\-]{8,}",
-                  r"\1[redacted]", text)
+    red = re.sub(r"(gho_|sk-|Bearer\s+|token[=:\"']+)[A-Za-z0-9_\-]{8,}",
+                 r"\1[redacted]", str(exc))
+    return red[:120]
 
 
 # --------------------------------------------------------------------------- #
@@ -213,34 +215,13 @@ WEEK = 7 * 24 * 3600_000
 MONTH = 30 * 24 * 3600_000
 
 
-# Dollars per million tokens: (in, out, cacheRead, cacheWrite). Independent
-# copy of the corpus generator's table — validate.py cross-checks the two,
-# which is the point: a pricing regression on either side fails the oracle.
-# Transcript rows without embedded cost (claude/codex/qwen stores) are priced
-# from this table; OpenCode/OMP costs come from their own stores.
-PRICING = {
-    "claude-opus-5": (15.0, 75.0, 1.5, 18.75),
-    "claude-sonnet-4-5": (3.0, 15.0, 0.3, 3.75),
-    "gpt-5-codex": (1.25, 10.0, 0.125, 0.0),
-    "gpt-5.1": (1.25, 10.0, 0.125, 0.0),
-    "qwen3.7-plus": (0.4, 1.2, 0.08, 0.0),
-    "qwen3-coder-plus": (0.5, 2.0, 0.1, 0.0),
-    "kimi-k2.5": (0.6, 2.5, 0.1, 0.0),
-    "glm-5": (0.7, 2.8, 0.12, 0.0),
-    "glm-4.7": (0.45, 1.8, 0.09, 0.0),
-    "MiniMax-M2.5": (0.35, 1.4, 0.07, 0.0),
-    "minilm-l12-v2": (0.0, 0.0, 0.0, 0.0),
-    "omp-default": (1.0, 4.0, 0.1, 1.25),
-}
-
-
-def price_for(model: str, inp: int, out: int, cr: int, cw: int) -> float:
-    p = PRICING.get(model)
-    if not p:
-        return 0.0
-    # Per-row 6-dp rounding mirrors the corpus generator's cost_for: the
-    # oracle compares sums, so both sides must quantize identically.
-    return round((inp * p[0] + out * p[1] + cr * p[2] + cw * p[3]) / 1e6, 6)
+# Cost policy: report ONLY what each store actually embeds — never fabricate
+# from a pricing table (a local widget has no reliable per-model price, and a
+# generator-side table mirrored into the engine would be a shared-
+# misunderstanding oracle, not a cross-check). OpenCode (DB $.cost) and OMP
+# (usage.cost.total) embed per-request cost; Claude Code embeds a top-level
+# costUSD in legacy formats (absent in current versions -> 0.0); Codex/Qwen
+# transcripts carry no cost at all. validate.py pins this per model.
 
 
 def parse_ts_ms(value) -> int | None:
@@ -738,10 +719,12 @@ def extract_claude(d):
     od = u.get("output_tokens_details") or {}
     inp, out = int(finite(u.get("input_tokens"))), int(finite(u.get("output_tokens")))
     cr = int(finite(u.get("cache_read_input_tokens")))
+    # costUSD: legacy Claude Code format embedded it per assistant line;
+    # current versions don't (only cumulative cost-state entries, which are
+    # a different feature). Read-if-present, else 0.0 — never fabricate.
     return (parse_ts_ms(d.get("timestamp")), str(m.get("model") or "claude"),
             inp, out, cr, int(cw),
-            int(finite(od.get("thinking_tokens"))),
-            price_for(str(m.get("model") or "claude"), inp, out, cr, cw))
+            int(finite(od.get("thinking_tokens"))), finite(d.get("costUSD")))
 
 
 def extract_codex(d):
@@ -757,10 +740,10 @@ def extract_codex(d):
     inp, out = int(finite(u.get("input_tokens"))), int(finite(u.get("output_tokens")))
     cr = int(finite(u.get("cached_input_tokens")))
     model = str(info.get("model") or "codex")
+    # Codex transcripts carry no cost — 0.0 is the truth, not a gap.
     return (parse_ts_ms(d.get("timestamp")), model,
             inp, out, cr, 0,
-            int(finite(u.get("reasoning_output_tokens"))),
-            price_for(model, inp, out, cr, 0))
+            int(finite(u.get("reasoning_output_tokens"))), 0.0)
 
 
 def extract_omp(d):
@@ -792,10 +775,10 @@ def extract_qwen(d):
     inp = int(finite(um.get("promptTokenCount")))
     out = int(finite(um.get("candidatesTokenCount")))
     cr = int(finite(pd.get("cachedContentTokenCount")))
+    # Qwen transcripts carry no cost — 0.0 is the truth, not a gap.
     return (parse_ts_ms(d.get("timestamp")), model,
             inp, out, cr,
-            0, int(finite(cd.get("thinkingTokenCount"))),
-            price_for(model, inp, out, cr, 0))
+            0, int(finite(cd.get("thinkingTokenCount"))), 0.0)
 
 
 def scan_claude(ctx: dict, models: dict, days: DayIndex, dtok: list, dreq: list) -> dict:

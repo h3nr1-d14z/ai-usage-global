@@ -24,7 +24,7 @@ Panel.qml          bar chip + popup: subscriptions tab, consumption tab
 engine/usage.py    stdlib-only fetch+scan engine → one JSON document
 tools/make_corpus.py  deterministic benchmark corpus generator
 bench/run_bench.py    timing harness (emits METRIC lines)
-tests/validate.py     39 golden invariants (correctness gate)
+tests/validate.py     golden invariants — the correctness gate
 autoresearch.sh       canonical benchmark entrypoint
 ```
 
