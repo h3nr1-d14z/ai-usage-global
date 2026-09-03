@@ -12,6 +12,8 @@ import qs.Ui
 // JSON document (quota windows per provider + local token consumption). Click
 // opens the panel; right/middle-click or 'R' refreshes; Esc closes; Tab walks
 // providers. The 1s nowMs ticker keeps every reset countdown honest while open.
+// Key rows: clipboard paste (wl-clipboard) + show/hide mask, Enter saves; a
+// configured Qwen on the census fallback re-offers its paste row.
 Panel {
   id: root
   moduleName: "h3nr1.d14z.ai-usage"
@@ -85,6 +87,29 @@ Panel {
     for (var i = 0; i < wins.length; i++)
       parts.push(wins[i].label + " " + Math.round(wins[i].percent) + "%")
     return (p.display || "") + " " + parts.join(" · ")
+  }
+
+  // Console cookie missing/stale: fetch_qwen fell back to the local census.
+  // True only for a configured qwen whose detail is census-flavoured.
+  function onCensusCookie(p) {
+    return p && p.id === "qwen" && p.configured
+      && String(p.detail || "").indexOf("local") === 0
+  }
+
+  // One dim hint line under a paste-key row: where the credential lives.
+  function keyHint(p) {
+    if (!p) return ""
+    if (root.onCensusCookie(p))
+      return "showing local counts — paste a fresh console cookie for live 5h/7d %"
+    var hints = {
+      opencode: "key: OpenCode Zen Go plan key",
+      openrouter: "key: openrouter.ai/keys",
+      kimi: "key: platform.moonshot.ai → API Keys",
+      zai: "key: z.ai console → API Keys",
+      deepseek: "key: platform.deepseek.com → API Keys",
+      qwen: "cookie: QwenCloud → DevTools → any request → copy the cookie: header"
+    }
+    return hints[p.id] || ""
   }
 
   function resetRemainingMs(iso) {
@@ -651,8 +676,12 @@ Panel {
     }
 
     // Unconfigured provider with a storeable credential: paste-key row.
+    // Also re-offered for a configured qwen stuck on the census fallback
+    // (missing or stale console cookie).
     Row {
-      visible: !block.p.configured && (block.p.keyEnv || "") !== ""
+      id: keyRow
+      visible: (block.p.keyEnv || "") !== ""
+               && (!block.p.configured || root.onCensusCookie(block.p))
       width: parent.width
       spacing: Style.space(6)
       Rectangle {
@@ -667,7 +696,8 @@ Panel {
           id: keyInput
           anchors.left: parent.left; anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          anchors.leftMargin: Style.space(8); anchors.rightMargin: Style.space(8)
+          anchors.leftMargin: Style.space(8)
+          anchors.rightMargin: keyActions.implicitWidth + Style.space(10)
           clip: true
           text: ""
           echoMode: TextInput.Password
@@ -691,6 +721,32 @@ Panel {
                       onClicked: keyInput.forceActiveFocus() }
           onAccepted: if (text.length > 0) {
             root.addKey(block.p.keyEnv, text); text = ""
+          }
+        }
+        // Inline field actions: clipboard paste + mask toggle.
+        Row {
+          id: keyActions
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.rightMargin: Style.space(6)
+          spacing: Style.space(8)
+          Text {
+            text: "paste"
+            color: clipReader.running ? root.accent : root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor;
+                        onClicked: if (!clipReader.running) clipReader.running = true }
+          }
+          Text {
+            text: keyInput.echoMode === TextInput.Password ? "show" : "hide"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor;
+                        onClicked: keyInput.echoMode =
+                          (keyInput.echoMode === TextInput.Password)
+                            ? TextInput.Normal : TextInput.Password }
           }
         }
       }
@@ -719,6 +775,32 @@ Panel {
           }
         }
       }
+    }
+
+    // Clipboard source for the paste action (wl-clipboard; no-op when the
+    // clipboard is empty or holds no usable first line).
+    Process {
+      id: clipReader
+      command: ["wl-paste", "--no-newline"]
+      stdout: StdioCollector {
+        waitForEnd: true
+        onStreamFinished: {
+          var t = String(text || "").split("\n")[0].trim()
+          if (t.toLowerCase().indexOf("cookie:") === 0) t = t.slice(7).trim()
+          if (t.length > 0) { keyInput.text = t; keyInput.forceActiveFocus() }
+        }
+      }
+    }
+
+    // Where this credential comes from (or why it is being re-offered).
+    Text {
+      visible: keyRow.visible && root.keyHint(block.p) !== ""
+      width: parent.width
+      text: root.keyHint(block.p)
+      elide: Text.ElideRight
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
     }
     Text {
       visible: (block.p.keyEnv || "") !== "" && root.keyAddStatus !== ""
