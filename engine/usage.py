@@ -565,7 +565,7 @@ def fetch_qwen(ctx: dict) -> dict:
                             continue
                         try:
                             d = json.loads(line)
-                        except ValueError:
+                        except (ValueError, RecursionError):
                             continue
                         ms = parse_ts_ms(d.get("timestamp"))
                         if ms is None or ms > now:
@@ -685,7 +685,7 @@ def walk_jsonl(label: str, files: list[str], extract, models: dict,
                 for line in fh:
                     try:
                         d = json.loads(line)
-                    except ValueError:
+                    except (ValueError, RecursionError):
                         continue
                     if observe is not None:
                         observe(d, parse_ts_ms(d.get("timestamp")
