@@ -681,7 +681,9 @@ def fetch_qwen_console(cookie: str, is_china: bool) -> list[dict] | None:
     node = payload.get("data")
     if not isinstance(node, dict):
         return None
-    # Gateway envelope: {"Data": "<json string>"} | {"DataV2": {data}} | {data}
+    # Envelope unwrap mirrors OMP's X8r: a JSON-string "Data" may wrap the
+    # payload, "DataV2".data may wrap that, and one further "data" member
+    # may hold the usage fields (live intl: data.DataV2.data.data.{per…}).
     if isinstance(node.get("Data"), str):
         try:
             parsed = json.loads(node["Data"])
@@ -692,7 +694,7 @@ def fetch_qwen_console(cookie: str, is_china: bool) -> list[dict] | None:
     dv2 = node.get("DataV2")
     if isinstance(dv2, dict) and isinstance(dv2.get("data"), dict):
         node = dv2["data"]
-    elif isinstance(node.get("data"), dict):
+    if isinstance(node.get("data"), dict):
         node = node["data"]
     f5 = _used_fraction(node.get("per5HourPercentage"))
     fw = _used_fraction(node.get("per1WeekPercentage"))

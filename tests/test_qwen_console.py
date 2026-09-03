@@ -14,6 +14,9 @@ against its OWN fixture dir + fake home, covering:
   4. China region marker selects the DataV2-unwrapping parse (the HTML
      SEC_TOKEN session branch needs live network; envelope + selection are
      what we pin here)
+  4b. live international envelope (2026-09-04): DataV2.data carries a
+      msg/code envelope, usage nests one level deeper — plus week-only
+      responses (fraction, not percent)
   5. cookie/secToken NEVER appear in the emitted document
   6. console failure (invalid session) → census fallback still exact
 
@@ -182,6 +185,36 @@ def main() -> int:
         check("china: ISO reset parsed",
               w.get("rolling", {}).get("resetsAt") == "2026-09-03T12:00:01Z",
               str(w.get("rolling")))
+
+        live_fix = tmp / "fx-live"
+        # Live international response (home.qwencloud.com, 2026-09-04):
+        # DataV2.data is a msg/code envelope; the usage fields sit one
+        # level deeper than the China shape (X8r's final .data descent).
+        make_fixtures(live_fix, {"data": {"secToken": "SECTOK3"}},
+                      {"data": {"DataV2": {"ret": ["SUCCESS::ok"], "data": {
+                          "msg": "Success.", "code": "SUCCESS",
+                          "requestId": "r-1", "success": True,
+                          "data": usage_body(42.5, 71.25, NOW_MS + 3600_000,
+                                             NOW_MS + 2 * 86400_000)}},
+                          "success": True, "httpStatus": 200}})
+        doc = run_engine(make_home(tmp / "h-live",
+                                   rows=["e=5; login_aliyunid_csrf=E6"]), live_fix)
+        w = wins_of(qwen_of(doc))
+        check("live intl: DataV2.data.data 5h",
+              w.get("rolling", {}).get("percent") == 42.5, str(w))
+        check("live intl: DataV2.data.data 7d",
+              w.get("weekly", {}).get("percent") == 71.3, str(w))
+        # The live account returned ONLY the week window, as a fraction.
+        wo_fix = tmp / "fx-weekonly"
+        make_fixtures(wo_fix, {"data": {"secToken": "SECTOK4"}},
+                      {"data": {"DataV2": {"data": {"data": usage_body(
+                          None, 0.417, None, NOW_MS + 2 * 86400_000)}}}})
+        rec = qwen_of(run_engine(make_home(tmp / "h-weekonly",
+                                           rows=["f=6; login_aliyunid_csrf=F7"]),
+                                 wo_fix))
+        check("week-only: fraction 0.417 → console · W 41.7%",
+              rec["detail"] == "console · W 41.7%" and rec["label"] == "42%",
+              f"{rec['detail']} / {rec['label']}")
 
         # 5) console failure → census fallback, exact counts ----------------- #
         bad_fix = tmp / "fx-bad"
