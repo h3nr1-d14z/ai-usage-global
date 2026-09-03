@@ -670,7 +670,6 @@ Panel {
           anchors.leftMargin: Style.space(8); anchors.rightMargin: Style.space(8)
           clip: true
           text: ""
-          placeholderText: "paste " + (block.p.keyEnv || "")
           echoMode: TextInput.Password
           color: root.foreground
           selectedTextColor: root.foreground
@@ -678,6 +677,15 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           selectByMouse: true
+          // TextInput has no placeholderText (that's TextField-only).
+          Text {
+            visible: keyInput.text === ""
+            anchors.left: parent.left
+            text: "paste " + (block.p.keyEnv || "")
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
           // The PanelKeyCatcher grabs focus on open; take ours back on click.
           MouseArea { anchors.fill: parent; cursorShape: Qt.IBeamCursor;
                       onClicked: keyInput.forceActiveFocus() }

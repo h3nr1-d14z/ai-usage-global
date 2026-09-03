@@ -89,7 +89,7 @@ bash autoresearch.sh        # corpus → 4 test suites → 9 timed runs
 ## Setup on the Omarchy machine
 
 ```sh
-git clone https://github.com/h3nr1.d14z/omarchy-ai-subcription-usage-tracker \
+git clone https://github.com/h3nr1-d14z/ai-usage-global.git \
   ~/.config/omarchy/plugins/h3nr1.d14z.ai-usage
 omarchy plugin enable h3nr1.d14z.ai-usage   # if not auto-enabled
 omarchy-shell shell rescanPlugins           # if not listed
