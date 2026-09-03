@@ -76,6 +76,12 @@ bash autoresearch.sh        # corpus → 4 test suites → 9 timed runs
   DataV2, numeric-string + ISO resets, secrets-absent, failure→census.
 - `bench/run_bench.py` — median engine_ms + workload invariants
   (tokens/requests scanned must not move). Baseline on this M1: ~142 ms.
+  Note: `output_bytes` carries ±1 byte of inherent noise — the engine
+  embeds its own `timings.totalMs` (0.1 ms resolution) in the document,
+  so the digit before the decimal can shift run to run. Proven
+  byte-identical otherwise (cfbcd23 vs HEAD corpus docs diff to nothing
+  once `timings` is stripped). Treat tokens/requests as the real
+  invariants; output_bytes only flags gross document changes.
 - `bench/last-validation.log` keeps one `== suite ==` transcript each.
 - Corpus/console isolation: validate + bench pop ambient
   `QWEN_PLAN_COOKIE` so corpus runs stay on the census path.
