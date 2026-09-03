@@ -801,7 +801,7 @@ Panel {
       visible: keyRow.visible && root.keyHint(block.p) !== ""
       width: parent.width
       text: root.keyHint(block.p)
-      elide: Text.ElideRight
+      wrapMode: Text.WordWrap
       color: root.dim
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
