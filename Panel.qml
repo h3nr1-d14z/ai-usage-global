@@ -48,9 +48,12 @@ Panel {
   readonly property string barDisplay: String(root.setting("barDisplay", "Data"))
   readonly property bool barShowsData: barDisplay.toLowerCase() === "data"
   readonly property string defaultProviderId: String(root.setting("defaultProvider", "opencode"))
-
+  // Everything actionable is shown: configured providers plus any with a
+  // paste affordance, so keys can be added while others already report.
+  readonly property var shownProviders: (root.providers || []).filter(function (p) {
+    return p && (p.configured || (p.keyEnv || "") !== "")
+  })
   readonly property var configuredProviders: (root.providers || []).filter(function (p) { return p && p.configured })
-  readonly property var shownProviders: configuredProviders.length > 0 ? configuredProviders : (root.providers || [])
   readonly property var selected: shownProviders.length > 0
     ? shownProviders[Math.min(selectedProvider, shownProviders.length - 1)] : null
 
