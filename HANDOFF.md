@@ -187,4 +187,5 @@ keys → `cfbcd23` Qwen console meter + test suites → `6935902` reset-time
 dedup + ISO coverage → numeric-string resets, docstrings, gate log,
 handoff → `28608d0` placeholderText fix → `df9ba17` live-intl
 `DataV2.data.data` unwrap → `18cc1df`/`2650ac7`/`b9eb6dd` key-input UX +
-panel fit → this commit (Linux verification record).
+panel fit → `11baf86` credential hints wrap (no eliding) → this commit
+(Linux verification record).
