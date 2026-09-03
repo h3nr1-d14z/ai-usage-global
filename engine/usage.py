@@ -268,6 +268,7 @@ def record(provider: dict, **fields) -> dict:
         "id": provider["id"], "name": provider["name"], "display": provider["display"],
         "configured": False, "kind": "note", "label": "", "value": None,
         "currency": "", "detail": "", "windows": [], "error": None,
+        "keyEnv": provider.get("keyEnv", ""),
     }
     base.update(fields)
     return base
@@ -611,14 +612,23 @@ QUOTA_ADAPTERS = {
     "qwen": fetch_qwen,
 }
 
+# keyEnv: the credential the panel's "Add key" UI stores for this provider
+# ("" = no remote credential — qwen is a local-plan meter, opencode also
+# auto-detects auth.json). Must match the first name in each adapter's
+# get_key() chain.
 PROVIDERS = [
-    {"id": "opencode", "name": "OpenCode Go", "display": "OC"},
-    {"id": "openrouter", "name": "OpenRouter", "display": "OR"},
-    {"id": "kimi", "name": "Kimi / Moonshot", "display": "KI"},
-    {"id": "zai", "name": "ZAI / GLM", "display": "Z"},
-    {"id": "deepseek", "name": "DeepSeek", "display": "DS"},
-    {"id": "copilot", "name": "GitHub Copilot", "display": "CP"},
-    {"id": "qwen", "name": "Qwen Coding Plan", "display": "AB"},
+    {"id": "opencode", "name": "OpenCode Go", "display": "OC",
+     "keyEnv": "OPENCODE_GO_API_KEY"},
+    {"id": "openrouter", "name": "OpenRouter", "display": "OR",
+     "keyEnv": "OPENROUTER_API_KEY"},
+    {"id": "kimi", "name": "Kimi / Moonshot", "display": "KI",
+     "keyEnv": "KIMI_API_KEY"},
+    {"id": "zai", "name": "ZAI / GLM", "display": "Z", "keyEnv": "ZAI_API_KEY"},
+    {"id": "deepseek", "name": "DeepSeek", "display": "DS",
+     "keyEnv": "DEEPSEEK_API_KEY"},
+    {"id": "copilot", "name": "GitHub Copilot", "display": "CP",
+     "keyEnv": "GITHUB_TOKEN"},
+    {"id": "qwen", "name": "Qwen Coding Plan", "display": "AB", "keyEnv": ""},
 ]
 
 
@@ -1042,11 +1052,43 @@ def build_document(settings: dict) -> dict:
     }
 
 
+def add_key(name: str, value: str) -> dict:
+    """Merge one KEY=value into ~/.config/ai-usage/env (0600). The value
+    arrives via stdin — argv would be visible in `ps`. Never echoes the
+    value back in the result."""
+    import re
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{2,64}", name):
+        return {"ok": False, "error": "invalid key name"}
+    value = value.strip()
+    if not value or len(value) > 4096 or "\n" in value or "\r" in value:
+        return {"ok": False, "error": "invalid key value"}
+    path = env_home() / ".config/ai-usage/env"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lines = []
+        if path.is_file():
+            lines = [l for l in path.read_text(encoding="utf-8").splitlines()
+                     if "=" in l and l.split("=", 1)[0].strip() != name]
+        lines.append(f"{name}={value}")
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        os.chmod(path, 0o600)
+    except OSError as exc:
+        return {"ok": False, "error": safe_error(exc)}
+    return {"ok": True, "file": str(path)}
+
+
 def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="AI Usage Global engine")
     parser.add_argument("--settings", default="", help="JSON settings file or inline JSON")
+    parser.add_argument("--add-key", default="", metavar="NAME",
+                        help="read one credential from stdin and store it")
     args = parser.parse_args()
+    if args.add_key:
+        result = add_key(args.add_key, sys.stdin.readline())
+        json.dump(result, sys.stdout, separators=(",", ":"))
+        sys.stdout.write("\n")
+        raise SystemExit(0 if result.get("ok") else 1)
     settings: dict = {}
     raw = args.settings
     if raw:

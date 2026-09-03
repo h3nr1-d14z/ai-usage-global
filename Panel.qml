@@ -184,6 +184,43 @@ Panel {
     }
   }
 
+  // ---- in-panel credential store (no file editing) ------------------------- //
+  property string keyAddPending: ""
+  property string keyAddValue: ""
+  property string keyAddStatus: ""
+  property int keyAddStatusTab: 0
+  function addKey(envName, value) {
+    if (keyAdder.running || !envName || !value) return
+    root.keyAddPending = envName
+    root.keyAddValue = value
+    root.keyAddStatus = ""
+    keyAdder.running = true
+  }
+  Process {
+    id: keyAdder
+    // The secret goes through stdin only — argv would be world-readable in ps.
+    stdinEnabled: true
+    command: ["python3", root.scriptPath(), "--add-key", root.keyAddPending]
+    stdout: StdioCollector { id: keyAddOut; waitForEnd: true }
+    onRunningChanged: if (running) write(root.keyAddValue + "\n")
+    onExited: function (code) {
+      var msg = "failed"
+      try {
+        var r = JSON.parse(keyAddOut.text || "{}")
+        msg = r.ok ? "saved " + root.keyAddPending : (r.error || "failed")
+      } catch (e) { /* keep "failed" */ }
+      root.keyAddValue = ""
+      root.keyAddStatus = msg
+      root.keyAddStatusTab += 1
+      root.refresh()
+    }
+  }
+  Timer {
+    interval: 6000
+    running: root.keyAddStatus !== ""
+    onTriggered: root.keyAddStatus = ""
+  }
+
   // ---- bar button ---------------------------------------------------------- //
   WidgetButton {
     id: button
@@ -291,7 +328,8 @@ Panel {
           Repeater {
             model: ["Subscriptions", "Consumption"]
             delegate: Rectangle {
-              property bool active: root.viewTab === index
+              required property int index
+              required property var modelData
               width: tabLabel.implicitWidth + Style.space(16)
               height: tabLabel.implicitHeight + Style.space(8)
               radius: height / 2
@@ -324,12 +362,12 @@ Panel {
 
           Repeater {
             model: root.shownProviders
-            delegate: ProviderBlock { providerData: modelData }
+            delegate: ProviderBlock {}
           }
 
           Text {
             visible: root.shownProviders.length === 0
-            text: "No providers configured yet. Add API keys to your environment."
+            text: "No providers configured yet — paste an API key in any row below."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -355,6 +393,7 @@ Panel {
                 { label: "All", value: root.humanTokens(root.local.totalTokens || 0) }
               ]
               delegate: Rectangle {
+                required property var modelData
                 width: (parent.width - Style.space(16)) / 3
                 height: statCol.implicitHeight + Style.space(14)
                 radius: Style.cornerRadius
@@ -432,6 +471,7 @@ Panel {
               delegate: Row {
                 width: parent.width
                 spacing: Style.space(8)
+                required property var modelData
                 property var row: modelData
                 Text {
                   width: parent.width * 0.42
@@ -532,11 +572,11 @@ Panel {
   // One provider: name, headline, meter bars per window with reset countdown.
   component ProviderBlock: Column {
     id: block
-    required property var providerData
+    required property var modelData
     width: parent ? parent.width : Style.space(340)
     spacing: Style.space(4)
 
-    readonly property var p: providerData || ({})
+    readonly property var p: modelData || ({})
     readonly property bool hot: p.id === root.defaultProviderId
 
     Row {
@@ -589,6 +629,7 @@ Panel {
           height: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
           radius: height / 2
+
           color: root.alpha(root.foreground, 0.08)
           Rectangle {
             width: parent.width * winRow.frac
@@ -607,6 +648,58 @@ Panel {
           font.pixelSize: Style.font.caption
         }
       }
+    }
+
+    // Unconfigured provider with a storeable credential: paste-key row.
+    Row {
+      visible: !block.p.configured && (block.p.keyEnv || "") !== ""
+      width: parent.width
+      spacing: Style.space(6)
+      TextField {
+        id: keyField
+        width: parent.width - saveKey.width - Style.space(12)
+        placeholderText: "paste " + (block.p.keyEnv || "")
+        echoMode: TextInput.Password
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        selectByMouse: true
+        onAccepted: if (text.length > 0) root.addKey(block.p.keyEnv, text)
+      }
+      Rectangle {
+        id: saveKey
+        width: saveKeyLabel.implicitWidth + Style.space(14)
+        height: keyField.height
+        radius: Style.cornerRadius
+        color: keyField.text.length > 0 ? root.accent : root.alpha(root.foreground, 0.08)
+        Text {
+          id: saveKeyLabel
+          anchors.centerIn: parent
+          text: root.keyAddPending === block.p.keyEnv && keyAdder.running
+                ? "saving…" : "Save"
+          color: keyField.text.length > 0 ? "#111111" : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+        MouseArea {
+          anchors.fill: parent
+          cursorShape: Qt.PointingHandCursor
+          onClicked: if (keyField.text.length > 0) {
+            root.addKey(block.p.keyEnv, keyField.text)
+            keyField.text = ""
+          }
+        }
+      }
+    }
+    Text {
+      visible: (block.p.keyEnv || "") !== "" && root.keyAddStatus !== ""
+               && (root.keyAddStatus.indexOf(block.p.keyEnv) >= 0
+                   || (root.keyAddPending === block.p.keyEnv && keyAdder.running))
+      text: keyAdder.running ? "" : root.keyAddStatus
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
     }
 
     Text {

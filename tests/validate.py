@@ -99,6 +99,15 @@ def main() -> int:
     required = {"id", "name", "display", "configured", "kind", "label", "value",
                 "currency", "detail", "windows", "error"}
     check("record fields complete", all(required <= set(p) for p in providers))
+    # keyEnv is the panel's paste-key contract: the UI stores under exactly
+    # this name, and the adapter's get_key() chain must read it back. A
+    # rename on one side without the other silently breaks key adding.
+    keyenv = {p["id"]: p.get("keyEnv") for p in providers}
+    check("keyEnv contract pinned", keyenv == {
+        "opencode": "OPENCODE_GO_API_KEY", "openrouter": "OPENROUTER_API_KEY",
+        "kimi": "KIMI_API_KEY", "zai": "ZAI_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY", "copilot": "GITHUB_TOKEN",
+        "qwen": ""}, str(keyenv))
     iso_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
     windows_ok = all(
         (w["percent"] is None or 0 <= w["percent"] <= 999)

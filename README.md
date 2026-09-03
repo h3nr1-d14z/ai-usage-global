@@ -55,7 +55,10 @@ The engine reads credentials from, lowest to highest precedence:
 2. `AIUSAGE_ENV_FILE` — alternative dotenv path
 3. the real process environment
 
-So: `mkdir -p ~/.config/ai-usage && printf 'OPENROUTER_API_KEY=sk-or-…\n' >> ~/.config/ai-usage/env`.
+Easiest: open the panel and paste the key into the provider's own row (the
+Save button stores it into `~/.config/ai-usage/env` with 0600 perms — the
+value travels over stdin, never argv). CLI equivalent:
+`mkdir -p ~/.config/ai-usage && printf 'OPENROUTER_API_KEY=sk-or-…\n' >> ~/.config/ai-usage/env`.
 
 ### Qwen / Alibaba Coding Plan — honest note
 
