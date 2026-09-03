@@ -21,13 +21,16 @@ cd "$(dirname "$0")"
 
 PY="${PYTHON:-python3}"
 
+: > bench/last-validation.log  # one record per suite; truncate once
+
 # 1. Corpus (idempotent; same seed/version => byte-identical).
 "$PY" tools/make_corpus.py --out bench/corpus >/dev/null
 
 # 2. Correctness gate — fail fast, never emit metrics on a broken engine.
 for t in tests/validate.py tests/test_sql_fallback.py tests/test_add_key.py \
          tests/test_qwen_console.py; do
-  if ! "$PY" "$t" > bench/last-validation.log 2>&1; then
+  echo "== $t ==" >> bench/last-validation.log
+  if ! "$PY" "$t" >> bench/last-validation.log 2>&1; then
     echo "VALIDATION FAILED ($t) — see bench/last-validation.log" >&2
     tail -n 20 bench/last-validation.log >&2 || true
     exit 1

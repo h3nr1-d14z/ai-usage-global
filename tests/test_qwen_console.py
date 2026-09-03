@@ -123,9 +123,12 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="qwconsole-"))
     try:
         intl_fix = tmp / "fx-intl"
+        # 5h reset is a NUMERIC STRING (gateway is sloppy about types;
+        # OMP's toNumber tolerates it), 7d reset plain epoch seconds.
         make_fixtures(intl_fix, {"data": {"secToken": "SECTOK", "accountId": "999"}},
                       {"data": {"Data": json.dumps(usage_body(
-                          42.5, 71.25, NOW_MS + 3600_000, NOW_MS + 2 * 86400_000))}})
+                          42.5, 71.25, str(NOW_MS + 3600_000),
+                          (NOW_MS + 2 * 86400_000) // 1000))}})
         chn_fix = tmp / "fx-chn"
         # China gateway answers reset times as ISO strings, not epoch —
         # parse_ts_ms must accept both (shared with the transcript census).
@@ -140,9 +143,10 @@ def main() -> int:
         w = wins_of(rec)
         check("env cookie: console 5h percent", w.get("rolling", {}).get("percent") == 42.5, str(w))
         check("env cookie: 7d half-up 71.3", w.get("weekly", {}).get("percent") == 71.3, str(w))
-        check("env cookie: resets forwarded",
-              str(w.get("rolling", {}).get("resetsAt", "")).startswith("2026-")
-              and w.get("weekly", {}).get("resetsAt"), str(w))
+        check("env cookie: resets exact (numeric-string s + epoch-ms)",
+              w.get("rolling", {}).get("resetsAt") == "2026-09-03T13:00:00Z"
+              and w.get("weekly", {}).get("resetsAt") == "2026-09-05T12:00:00Z",
+              str(w))
         check("env cookie: detail says console", rec["detail"].startswith("console"), rec["detail"])
         text = json.dumps(doc)
         check("secrets absent from document",

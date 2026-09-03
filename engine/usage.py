@@ -699,22 +699,31 @@ def fetch_qwen_console(cookie: str, is_china: bool) -> list[dict] | None:
     windows = []
     if f5 is not None:
         windows.append(window("rolling", "5h", H5, percent=f5 * 100.0,
-                              resets_at_ms=parse_ts_ms(node.get("per5HourResetTime"))))
+                              resets_at_ms=_reset_ms(node.get("per5HourResetTime"))))
     if fw is not None:
         windows.append(window("weekly", "W", WEEK, percent=fw * 100.0,
-                              resets_at_ms=parse_ts_ms(node.get("per1WeekResetTime"))))
+                              resets_at_ms=_reset_ms(node.get("per1WeekResetTime"))))
     return windows or None
+
+
+def _reset_ms(value) -> int | None:
+    """Gateway reset times: epoch seconds/ms, numeric strings, or ISO."""
+    n = finite(value, -1.0)
+    return parse_ts_ms(n) if n > 0 else parse_ts_ms(value)
 
 
 def fetch_qwen(ctx: dict) -> dict:
     """Alibaba Cloud Model Studio Coding Plan (Qwen token plan).
 
-    There is no public usage endpoint for sk-sp-* keys (every dashscope
-    quota path 404s; the console gateway needs a browser session — verified
-    in steipete/CodexBar#612). So the quota plane is computed from LOCAL
-    Qwen Code CLI transcripts (~/.qwen/projects/*/chats/*.jsonl) counted
-    against the plan caps (Pro: 6k req/5h, 45k/wk, 90k/mo; configurable).
-    Same unit the official console dashboard uses: request counts."""
+    Console gateway first: with a session cookie (QWEN_PLAN_COOKIE env or
+    auto-detected from the OMP agent.db) the real 5h/7d credit percentages
+    and reset times come from the dashboard's api.json endpoint. There is
+    no public usage endpoint for sk-sp-* keys (dashscope quota paths 404;
+    verified in steipete/CodexBar#612), so without a cookie — or when the
+    gateway fails — the quota plane falls back to LOCAL Qwen Code CLI
+    transcripts (~/.qwen/projects/*/chats/*.jsonl) counted against the plan
+    caps (Pro: 6k req/5h, 45k/wk, 90k/mo; configurable). Same unit the
+    official console dashboard shows: request counts."""
     p = ctx["provider"]
     caps = ctx.get("caps") or {}
     cap5 = max(1, int(finite(caps.get("qwenPlanCap5h"), 6000)))

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "h3nr1.d14z.ai-usage",
   "name": "AI Usage Global",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "h3nr1.d14z",
   "license": "MIT",
   "description": "Multi-provider AI subscription usage in the Omarchy bar: live quota meters (OpenCode Go, OpenRouter, Kimi, ZAI, DeepSeek, Copilot, Qwen Coding Plan) plus local token consumption scanned from your own agent transcripts — models, use-rate and reset countdowns included.",
