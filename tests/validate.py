@@ -12,9 +12,11 @@ Checks:
   3.  Windows sane: percent within 0..999, resetsAt ISO-8601 or null.
   4.  Quota values match fixture math exactly (round-half-up display).
   5.  Local consumption equals the corpus manifest EXACTLY — the scanner must
-      neither invent nor drop tokens (per-model buckets, totals, days).
+      neither invent nor drop tokens/requests/cost (per-model buckets, totals,
+      per-day arrays; engine PRICING vs generator PRICING cross-checked).
   6.  The qwen plan census reproduces the corpus 5h/week/month request counts.
-  7.  Error strings / document never leak credential-looking tokens.
+  7.  Error strings / document never leak credential-shaped tokens NOR any
+      of the corpus fixture secrets actually written to disk.
   8.  Determinism: reruns are byte-identical modulo `timings` (the metric).
 """
 
@@ -28,8 +30,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+import time
+
 ROOT = Path(__file__).resolve().parent.parent
 CORPUS = ROOT / "bench/corpus"
+
+# Pin local date math to UTC (see tools/make_corpus.py); the engine inherits
+# TZ via the env below, so day goldens are timezone-independent.
+os.environ["TZ"] = "UTC"
+time.tzset()
 
 FAILURES: list[str] = []
 
@@ -43,7 +52,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
 def strip_timings(text: str) -> str:
     doc = json.loads(text)
     doc.pop("timings", None)
-    return json.dumps(doc, sort_keys=True)
+    # NO sort_keys: insertion order is itself a determinism contract
+    # (scanner fold order, provider order). Sorting would hide reorders.
+    return json.dumps(doc)
 
 
 def main() -> int:
@@ -56,6 +67,7 @@ def main() -> int:
         "AIUSAGE_FIXTURES": str(CORPUS / "fixtures"),
         "AIUSAGE_ENV_FILE": str(CORPUS / "env"),
         "PYTHONDONTWRITEBYTECODE": "1",
+        "TZ": "UTC",
     })
 
     def run_engine() -> subprocess.CompletedProcess:
@@ -162,10 +174,16 @@ def main() -> int:
                       "cacheWriteTokens", "reasoningTokens", "requests"):
             if got_b.get(field) != exp_b[field]:
                 model_diff.append(f"{model}.{field} {got_b.get(field)}!={exp_b[field]}")
+        # cost: independent tables (engine PRICING vs generator PRICING) —
+        # a pricing regression on either side fails here. Tolerance covers
+        # float accumulation order only; 1e-4$ is far below any real drift.
+        if abs(got_b.get("cost", -1) - exp_b["cost"]) > 1e-4:
+            model_diff.append(f"{model}.cost {got_b.get('cost')}!={exp_b['cost']}")
     extra = set(local.get("models", {})) - set(expected["models"])
     if extra:
         model_diff.append(f"extra:{sorted(extra)}")
-    check("per-model buckets exact", not model_diff, "; ".join(model_diff[:6]))
+    check("per-model buckets exact (incl. cost)", not model_diff,
+          "; ".join(model_diff[:6]))
 
     days = local.get("recentDays", [])
     check("recentDays = 7", len(days) == 7)
@@ -202,10 +220,19 @@ def main() -> int:
     sources = {s["source"] for s in local.get("sources", [])}
     check("all 5 sources reported",
           sources >= {"opencode", "claude", "codex", "qwen", "omp"}, str(sources))
-
     # ---- hygiene -------------------------------------------------------------- #
-    leak = re.search(r"(gho_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9-]{10,}|oc-env|gho_env)", text)
-    check("no credential leakage in document", leak is None, leak.group(0) if leak else "")
+    # (1) generic credential-shaped strings, (2) the ACTUAL fixture secrets the
+    # corpus writes (auth.json/copilot/kimi/deepseek/env file) — the old regex
+    # only matched an unexercised 'oc-env' substring and let the real
+    # oc-fixtured-key-000000 token through.
+    fixture_secrets = ["oc-fixtured-key-000000", "gho_fixturedcopilottoken0000000000",
+                       "sk-fixtured-kimi-key", "sk-fixtured-deepseek-key",
+                       "oc-env-key", "sk-or-env-key", "sk-kimi-env-key",
+                       "sk-zai-env-key", "sk-ds-env-key", "gho_env_copilot_token"]
+    leaked = [s for s in fixture_secrets if s in text]
+    leak = re.search(r"(gho_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9-]{10,})", text)
+    check("no credential leakage in document", not leaked and leak is None,
+          f"secrets={leaked} pattern={leak.group(0) if leak else ''}")
 
     # ---- determinism ----------------------------------------------------------- #
     proc2 = run_engine()

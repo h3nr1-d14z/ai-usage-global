@@ -48,6 +48,7 @@ def main() -> int:
         "AIUSAGE_HOME": str(corpus / "home"),
         "AIUSAGE_FIXTURES": str(corpus / "fixtures"),
         "AIUSAGE_ENV_FILE": str(corpus / "env"),
+        "TZ": "UTC",  # corpus day goldens are UTC-pinned
         "PYTHONDONTWRITEBYTECODE": "1",
     })
     cmd = [sys.executable, str(ROOT / "engine/usage.py"),

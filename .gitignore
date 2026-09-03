@@ -9,5 +9,8 @@ bench/last-validation.log
 __pycache__/
 *.pyc
 
+# macOS
+.DS_Store
+
 # Plugin assets under construction
 preview.png

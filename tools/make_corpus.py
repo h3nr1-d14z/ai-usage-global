@@ -26,13 +26,22 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import random
 import shutil
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
-CORPUS_VERSION = 4  # v4: expected.recentDays per-day golden arrays
+# Day buckets are host-local by design (engine matches user wall clocks);
+# pin the corpus to UTC so expectations don't drift between the machine
+# that generated them and the one that validates. validate.py/run_bench.py
+# pass TZ=UTC to the engine, so both sides agree.
+os.environ["TZ"] = "UTC"
+time.tzset()
+
+CORPUS_VERSION = 5  # v5: qwen traffic spans 38d (month-boundary exercised)
 
 # Fixed anchor: 2026-09-03T12:00:00Z. Pinned so window math is reproducible.
 FIXED_NOW_MS = int(dt.datetime(2026, 9, 3, 12, 0, 0, tzinfo=dt.timezone.utc)
@@ -247,11 +256,13 @@ def write_qwen(home: Path, rng: random.Random, expect: Expect) -> dict:
                 model = models[(proj_index * 7 + chat + i) % len(models)]
                 t = tokens_for(model, rng)
                 # Half the traffic sits inside the recent 5h window so the
-                # Coding Plan meters have real numbers to render.
+                # Coding Plan meters have real numbers to render. The other
+                # half spans 38 days: deliberately past the 30-day month cap
+                # so the census boundary (age <= MONTH) is exercised.
                 if i % 2 == 0:
                     ms = FIXED_NOW_MS - rng.randrange(0, 4 * H5_MS)
                 else:
-                    ms = FIXED_NOW_MS - rng.randrange(0, 30 * DAY_MS)
+                    ms = FIXED_NOW_MS - rng.randrange(0, 38 * DAY_MS)
                 cost = cost_for(model, t)
                 expect.add(model, t, cost)
                 n += 1
@@ -261,7 +272,7 @@ def write_qwen(home: Path, rng: random.Random, expect: Expect) -> dict:
                 age = FIXED_NOW_MS - ms
                 windowed["5h"] += 1 if age <= H5_MS else 0
                 windowed["week"] += 1 if age <= 7 * DAY_MS else 0
-                windowed["month"] += 1
+                windowed["month"] += 1 if age <= 30 * DAY_MS else 0
                 lines.append(json.dumps({
                     "type": "assistant",
                     "timestamp": iso_utc(ms),

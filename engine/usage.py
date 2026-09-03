@@ -99,6 +99,15 @@ def round_up(value: float, digits: int = 1) -> float:
     return math.floor(abs(value) * factor + 0.5) / factor * (1 if value >= 0 else -1)
 
 
+def safe_error(exc: Exception) -> str:
+    """Transport errors surface in the panel; never let a bearer token or
+    key-shaped substring ride along in an exception message."""
+    import re
+    text = str(exc)[:120]
+    return re.sub(r"(gho_|sk-|Bearer\s+|token[=:\"']+)[A-Za-z0-9_\-]{8,}",
+                  r"\1[redacted]", text)
+
+
 # --------------------------------------------------------------------------- #
 # Transport: live HTTPS or deterministic fixtures
 # --------------------------------------------------------------------------- #
@@ -204,6 +213,36 @@ WEEK = 7 * 24 * 3600_000
 MONTH = 30 * 24 * 3600_000
 
 
+# Dollars per million tokens: (in, out, cacheRead, cacheWrite). Independent
+# copy of the corpus generator's table — validate.py cross-checks the two,
+# which is the point: a pricing regression on either side fails the oracle.
+# Transcript rows without embedded cost (claude/codex/qwen stores) are priced
+# from this table; OpenCode/OMP costs come from their own stores.
+PRICING = {
+    "claude-opus-5": (15.0, 75.0, 1.5, 18.75),
+    "claude-sonnet-4-5": (3.0, 15.0, 0.3, 3.75),
+    "gpt-5-codex": (1.25, 10.0, 0.125, 0.0),
+    "gpt-5.1": (1.25, 10.0, 0.125, 0.0),
+    "qwen3.7-plus": (0.4, 1.2, 0.08, 0.0),
+    "qwen3-coder-plus": (0.5, 2.0, 0.1, 0.0),
+    "kimi-k2.5": (0.6, 2.5, 0.1, 0.0),
+    "glm-5": (0.7, 2.8, 0.12, 0.0),
+    "glm-4.7": (0.45, 1.8, 0.09, 0.0),
+    "MiniMax-M2.5": (0.35, 1.4, 0.07, 0.0),
+    "minilm-l12-v2": (0.0, 0.0, 0.0, 0.0),
+    "omp-default": (1.0, 4.0, 0.1, 1.25),
+}
+
+
+def price_for(model: str, inp: int, out: int, cr: int, cw: int) -> float:
+    p = PRICING.get(model)
+    if not p:
+        return 0.0
+    # Per-row 6-dp rounding mirrors the corpus generator's cost_for: the
+    # oracle compares sums, so both sides must quantize identically.
+    return round((inp * p[0] + out * p[1] + cr * p[2] + cw * p[3]) / 1e6, 6)
+
+
 def parse_ts_ms(value) -> int | None:
     if isinstance(value, bool):
         return None
@@ -288,7 +327,7 @@ def fetch_opencode(ctx: dict) -> dict:
                 fetch_json("https://opencode.ai/zen/go/v1/usage",
                            {"Authorization": f"Bearer {key}"}))
     except Exception as exc:  # noqa: BLE001
-        return record(p, error=str(exc)[:120])
+        return record(p, error=safe_error(exc))
     usage = body.get("usage") if isinstance(body, dict) else None
     if not isinstance(usage, dict):
         return record(p, error="unexpected-response")
@@ -324,7 +363,7 @@ def fetch_openrouter(ctx: dict) -> dict:
                 raise
             keyinfo = fetch_json("https://openrouter.ai/api/v1/key", hdr)
     except Exception as exc:  # noqa: BLE001
-        return record(p, error=str(exc)[:120])
+        return record(p, error=safe_error(exc))
     cd = credits.get("data") if isinstance(credits, dict) else None
     kd = keyinfo.get("data") if isinstance(keyinfo, dict) else None
     if not isinstance(cd, dict) or cd.get("total_credits") is None:
@@ -361,7 +400,7 @@ def fetch_kimi(ctx: dict) -> dict:
                 fetch_json(f"https://{host}/v1/users/me/balance",
                            {"Authorization": f"Bearer {key}"}))
     except Exception as exc:  # noqa: BLE001
-        return record(p, error=str(exc)[:120])
+        return record(p, error=safe_error(exc))
     data = body.get("data") if isinstance(body, dict) else None
     if not isinstance(data, dict) or data.get("available_balance") is None:
         return record(p, error="unexpected-response")
@@ -408,7 +447,7 @@ def fetch_zai(ctx: dict) -> dict:
                 # Region implementations disagree: some want the bare key.
                 body = fetch_json(url, {"Authorization": key})
     except Exception as exc:  # noqa: BLE001
-        return record(p, error=str(exc)[:120])
+        return record(p, error=safe_error(exc))
     data = body.get("data") if isinstance(body, dict) else None
     limits = data.get("limits") if isinstance(data, dict) else None
     if not isinstance(limits, list):
@@ -448,7 +487,7 @@ def fetch_deepseek(ctx: dict) -> dict:
                 fetch_json("https://api.deepseek.com/user/balance",
                            {"Authorization": f"Bearer {key}"}))
     except Exception as exc:  # noqa: BLE001
-        return record(p, error=str(exc)[:120])
+        return record(p, error=safe_error(exc))
     infos = body.get("balance_infos") if isinstance(body, dict) else None
     if not isinstance(infos, list) or not infos:
         return record(p, error="unexpected-response")
@@ -478,7 +517,7 @@ def fetch_copilot(ctx: dict) -> dict:
                            {"Authorization": f"Bearer {token}",
                             "Editor-Version": "ai-usage/1.0"}))
     except Exception as exc:  # noqa: BLE001
-        return record(p, error=str(exc)[:120])
+        return record(p, error=safe_error(exc))
     if not isinstance(body, dict) or not isinstance(body.get("quota_snapshots"), dict):
         return record(p, error="unexpected-response")
     snap = body["quota_snapshots"]
@@ -697,10 +736,12 @@ def extract_claude(d):
                 finite(cc.get("ephemeral_5m_input_tokens"))
                 + finite(cc.get("ephemeral_1h_input_tokens")))
     od = u.get("output_tokens_details") or {}
+    inp, out = int(finite(u.get("input_tokens"))), int(finite(u.get("output_tokens")))
+    cr = int(finite(u.get("cache_read_input_tokens")))
     return (parse_ts_ms(d.get("timestamp")), str(m.get("model") or "claude"),
-            int(finite(u.get("input_tokens"))), int(finite(u.get("output_tokens"))),
-            int(finite(u.get("cache_read_input_tokens"))), int(cw),
-            int(finite(od.get("thinking_tokens"))), 0.0)
+            inp, out, cr, int(cw),
+            int(finite(od.get("thinking_tokens"))),
+            price_for(str(m.get("model") or "claude"), inp, out, cr, cw))
 
 
 def extract_codex(d):
@@ -713,10 +754,13 @@ def extract_codex(d):
     u = info.get("token_usage") or info.get("last_token_usage")
     if not isinstance(u, dict):
         return None
-    return (parse_ts_ms(d.get("timestamp")), str(info.get("model") or "codex"),
-            int(finite(u.get("input_tokens"))), int(finite(u.get("output_tokens"))),
-            int(finite(u.get("cached_input_tokens"))), 0,
-            int(finite(u.get("reasoning_output_tokens"))), 0.0)
+    inp, out = int(finite(u.get("input_tokens"))), int(finite(u.get("output_tokens")))
+    cr = int(finite(u.get("cached_input_tokens")))
+    model = str(info.get("model") or "codex")
+    return (parse_ts_ms(d.get("timestamp")), model,
+            inp, out, cr, 0,
+            int(finite(u.get("reasoning_output_tokens"))),
+            price_for(model, inp, out, cr, 0))
 
 
 def extract_omp(d):
@@ -745,11 +789,13 @@ def extract_qwen(d):
     pd = um.get("promptTokensDetails") or {}
     cd = um.get("candidatesTokensDetails") or {}
     model = str((d.get("message") or {}).get("model") or d.get("model") or "qwen")
+    inp = int(finite(um.get("promptTokenCount")))
+    out = int(finite(um.get("candidatesTokenCount")))
+    cr = int(finite(pd.get("cachedContentTokenCount")))
     return (parse_ts_ms(d.get("timestamp")), model,
-            int(finite(um.get("promptTokenCount"))),
-            int(finite(um.get("candidatesTokenCount"))),
-            int(finite(pd.get("cachedContentTokenCount"))),
-            0, int(finite(cd.get("thinkingTokenCount"))), 0.0)
+            inp, out, cr,
+            0, int(finite(cd.get("thinkingTokenCount"))),
+            price_for(model, inp, out, cr, 0))
 
 
 def scan_claude(ctx: dict, models: dict, days: DayIndex, dtok: list, dreq: list) -> dict:

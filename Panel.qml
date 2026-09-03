@@ -117,7 +117,7 @@ Panel {
 
   // ---- refresh / ipc ------------------------------------------------------- //
   function refresh() { if (!engine.running) engine.running = true }
-  function scriptPath() { return Qt.resolvedUrl("engine/usage.py").toString().replace(/^file:\/\//, "") }
+  function scriptPath() { return decodeURIComponent(Qt.resolvedUrl("engine/usage.py").toString().replace(/^file:\/\//, "")) }
   function settingsJson() {
     return JSON.stringify({
       refreshIntervalSec: root.refreshIntervalSec,
@@ -166,7 +166,11 @@ Panel {
           var data = JSON.parse(output)
           root.providers = data.providers || []
           root.local = data.local || {}
-          root.errorText = (data.errors && data.errors.length) ? "some providers failed" : ""
+          // no-key/no-token/no-local-store are expected states for
+          // unconfigured providers; only real fetch failures get the banner.
+          var benign = ["no-key", "no-token", "no-local-store"]
+          var real = (data.errors || []).filter(function (e) { return benign.indexOf(e) < 0 })
+          root.errorText = real.length ? "some providers failed" : ""
         } catch (e) {
           root.errorText = "parse failed"
         }
@@ -222,7 +226,7 @@ Panel {
     open: root.opened
     focusTarget: catcher
     contentWidth: panel.fittedContentWidth(Style.space(360))
-    contentHeight: panel.fittedContentHeight(bodyColumn.implicitHeight)
+    contentHeight: panel.fittedContentHeight(bodyColumn.implicitHeight, Style.space(640))
 
     PanelKeyCatcher {
       id: catcher
@@ -233,10 +237,10 @@ Panel {
         var n = root.shownProviders.length
         if (n > 0) root.selectedProvider = (root.selectedProvider + direction + n) % n
       }
-      Keys.onPressed: function (event) {
-        if (event.key === Qt.Key_R) { root.refresh(); event.accepted = true }
-        else if (event.key === Qt.Key_1) { root.viewTab = 0; event.accepted = true }
-        else if (event.key === Qt.Key_2) { root.viewTab = 1; event.accepted = true }
+      onTextKey: function (t) {
+        if (t === "r" || t === "R") root.refresh()
+        else if (t === "1") root.viewTab = 0
+        else if (t === "2") root.viewTab = 1
       }
 
       Column {
@@ -250,6 +254,7 @@ Panel {
           width: parent.width - Style.space(24)
           spacing: Style.space(10)
           Column {
+            id: heroColumn
             spacing: 2
             Text {
               text: "AI Usage Global"
@@ -267,8 +272,9 @@ Panel {
               font.pixelSize: Style.font.caption
             }
           }
-          Item { width: parent.width - childrenRect.width; height: 1 }
+          Item { width: Math.max(0, parent.width - heroColumn.implicitWidth - errorText.implicitWidth - parent.spacing * 2); height: 1 }
           Text {
+            id: errorText
             anchors.verticalCenter: parent.verticalCenter
             text: root.errorText
             color: root.urgent

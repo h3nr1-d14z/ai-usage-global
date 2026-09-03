@@ -10,14 +10,27 @@ DEST_DIR="$HOME/.config/omarchy/plugins/$PLUGIN_ID"
 
 NO_TAIL=0
 RESTART=0
+REMOVE=0
 for arg in "$@"; do
   case "$arg" in
-    -h|--help) echo "Usage: ./dev.sh [--no-tail] [--restart]"; exit 0 ;;
+    -h|--help) echo "Usage: ./dev.sh [--no-tail] [--restart] [--remove]"; exit 0 ;;
     --no-tail) NO_TAIL=1 ;;
     --restart) RESTART=1 ;;
+    --remove) REMOVE=1 ;;
     *) echo "Unknown option: $arg" >&2; exit 1 ;;
   esac
 done
+
+if [[ "$REMOVE" -eq 1 ]]; then
+  if [[ -L "$DEST_DIR" ]]; then
+    rm "$DEST_DIR"
+    echo "==> Unlinked $DEST_DIR"
+  else
+    echo "==> No dev symlink at $DEST_DIR (nothing to remove)"
+  fi
+  command -v omarchy-shell >/dev/null 2>&1 && omarchy-shell shell rescanPlugins || true
+  exit 0
+fi
 
 mkdir -p "$(dirname "$DEST_DIR")"
 if [[ -L "$DEST_DIR" ]]; then

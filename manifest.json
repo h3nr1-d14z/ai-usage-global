@@ -22,7 +22,7 @@
       "refreshIntervalSec": 900,
       "barDisplay": "Data",
       "defaultProvider": "opencode",
-      "showLocalConsumption": true,
+      "showLocalConsumption": "On",
       "qwenPlanCap5h": 6000,
       "qwenPlanCapWeek": 45000,
       "qwenPlanCapMonth": 90000
@@ -30,7 +30,7 @@
     "schema": [
       { "key": "refreshIntervalSec", "type": "integer", "label": "Refresh interval (seconds)", "min": 60, "max": 3600, "step": 30, "defaultValue": 900 },
       { "key": "barDisplay", "type": "enum", "label": "Bar display", "options": ["Icon", "Data"], "defaultValue": "Data", "description": "Icon shows a compact chip; Data shows the default provider's headline line." },
-      { "key": "defaultProvider", "type": "enum", "label": "Default provider (Data mode)", "options": ["opencode", "openrouter", "kimi", "zai", "deepseek", "copilot", "qwen", "claude", "codex"], "defaultValue": "opencode" },
+      { "key": "defaultProvider", "type": "enum", "label": "Default provider (Data mode)", "options": ["opencode", "openrouter", "kimi", "zai", "deepseek", "copilot", "qwen"], "defaultValue": "opencode" },
       { "key": "showLocalConsumption", "type": "enum", "label": "Local token consumption", "options": ["On", "Off"], "defaultValue": "On", "description": "Scan local agent stores (OpenCode DB, Claude/Codex/Qwen/OMP transcripts) for per-model token usage. Read-only." },
       { "key": "qwenPlanCap5h", "type": "integer", "label": "Qwen plan: requests / 5h", "min": 100, "max": 100000, "step": 100, "defaultValue": 6000 },
       { "key": "qwenPlanCapWeek", "type": "integer", "label": "Qwen plan: requests / week", "min": 100, "max": 500000, "step": 500, "defaultValue": 45000 },
