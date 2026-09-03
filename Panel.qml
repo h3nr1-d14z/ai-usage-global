@@ -110,6 +110,7 @@ Panel {
       kimi: "key: platform.moonshot.ai → API Keys",
       zai: "key: z.ai console → API Keys",
       deepseek: "key: platform.deepseek.com → API Keys",
+      copilot: "token: github.com → Developer settings → Personal access tokens",
       qwen: "cookie: QwenCloud → DevTools → any request → copy the cookie: header"
     }
     return hints[p.id] || ""
@@ -292,7 +293,7 @@ Panel {
     open: root.opened
     focusTarget: catcher
     contentWidth: panel.fittedContentWidth(Style.space(360))
-    contentHeight: panel.fittedContentHeight(bodyColumn.implicitHeight, Style.space(640))
+    contentHeight: panel.fittedContentHeight(bodyColumn.implicitHeight)
 
     PanelKeyCatcher {
       id: catcher
