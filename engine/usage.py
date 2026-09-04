@@ -877,11 +877,14 @@ def _row(ms: int, model: str, inp: int, out: int, cr: int, cw: int, rs: int,
 
 
 def walk_jsonl(label: str, files: list[str], extract, models: dict,
-               days: DayIndex, dtok: list, dreq: list, observe=None) -> dict:
+               days: DayIndex, dtok: list, dreq: list, observe=None,
+               sink: dict | None = None) -> dict:
     """Shared skeleton: json.loads per line, extractor returns
     (ms, model, inp, out, cr, cw, rs, cost) or None to skip. observe(d, ms)
     is called for every parsed line before extraction (used by the qwen
-    scan to feed the plan census without a second pass)."""
+    scan to feed the plan census without a second pass). sink, when given,
+    accumulates this call's tokens/requests — scan_omp uses it to attribute
+    transcript lanes (main / advisor / subagent) without a second read."""
     n_req = 0
     seen_models: set[str] = set()
     for path in files:
@@ -905,7 +908,9 @@ def walk_jsonl(label: str, files: list[str], extract, models: dict,
                         continue
                     _row(*rec, models, days, dtok, dreq)
                     n_req += 1
-                    seen_models.add(rec[1])
+                    if sink is not None:
+                        sink["tokens"] += rec[2] + rec[3] + rec[4] + rec[5] + rec[6]
+                        sink["requests"] += 1
         except OSError:
             continue
     return {"source": label, "requests": n_req, "models": sorted(seen_models)}
@@ -1000,9 +1005,35 @@ def scan_codex(ctx: dict, models: dict, days: DayIndex, dtok: list, dreq: list) 
 
 
 def scan_omp(ctx: dict, models: dict, days: DayIndex, dtok: list, dreq: list) -> dict:
-    files = sorted(glob.glob(str(ctx["home"] / ".omp/agent/sessions/**/*.jsonl"),
-                             recursive=True))
-    return walk_jsonl("omp", files, extract_omp, models, days, dtok, dreq)
+    """OMP transcripts carry a lane structure: top-level session files are
+    the main agents, __advisor.jsonl inside a session dir is the advisor,
+    and any other nested file (named after the subagent) is a spawned
+    subagent. Lanes are attributed per file so the panel can show the
+    split. Oneshot completion() calls (model roles) write no transcript
+    anywhere on disk — a runtime gap this engine cannot close; the panel
+    reports that lane as untracked rather than folding it in."""
+    root = ctx["home"] / ".omp/agent/sessions"
+    files = sorted(glob.glob(str(root / "**/*.jsonl"), recursive=True))
+    groups: dict[str, list[str]] = {"main": [], "advisor": [], "subagent": []}
+    for f in files:
+        name = os.path.basename(f)
+        if name == "__advisor.jsonl":
+            groups["advisor"].append(f)
+        elif os.path.dirname(os.path.dirname(f)) == str(root):
+            groups["main"].append(f)
+        else:
+            groups["subagent"].append(f)
+    src: dict = {"source": "omp", "requests": 0, "models": []}
+    lanes: dict[str, dict] = {}
+    for lane in ("main", "advisor", "subagent"):
+        sink = {"tokens": 0, "requests": 0}
+        s = walk_jsonl("omp", groups[lane], extract_omp, models, days, dtok, dreq,
+                       sink=sink)
+        src["requests"] += s["requests"]
+        src["models"] = sorted(set(src["models"]) | set(s["models"]))
+        lanes[lane] = sink
+    src["lanes"] = lanes
+    return src
 
 
 def scan_qwen(ctx: dict, models: dict, days: DayIndex, dtok: list, dreq: list) -> dict:
@@ -1173,6 +1204,55 @@ def merge_local(results, days: DayIndex, now: int) -> dict:
         "sources": sources,
     }
 
+def update_history(ctx: dict, now: int, local: dict, providers: list) -> list:
+    """Upsert today's snapshot into the persisted daily history and return
+    the trailing 30 days for the document. Provider-cap percents ride along
+    in the file (not surfaced yet): history not recorded now can never be
+    reconstructed later. Path derives from env_home() so test corpora stay
+    isolated. Never raises — history is a bonus, not a plane."""
+    try:
+        path = (ctx["home"] / ".local/state/h3nr1.d14z.ai-usage/history.json")
+        days: dict = {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("days"), dict):
+                days = data["days"]
+        except (OSError, ValueError):
+            days = {}
+        today = local_date(now)
+        caps: dict = {}
+        for p in providers:
+            if not p.get("configured"):
+                continue
+            wins = {}
+            for w in p.get("windows") or []:
+                if w.get("percent") is not None:
+                    wins[str(w.get("id") or w.get("label"))] = w["percent"]
+            if wins:
+                caps[p["id"]] = wins
+        days[today] = {"tokens": local.get("todayTokens", 0),
+                       "requests": local.get("todayRequests", 0),
+                       "caps": caps}
+        days = {d: days[d] for d in sorted(days)[-60:]}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.parent / (path.name + ".tmp")
+        tmp.write_text(json.dumps({"days": days}, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, path)
+        out = []
+        for i in range(29, -1, -1):
+            d = local_date(now - i * 86400_000)
+            if d == today:
+                out.append({"date": d, "tokens": local.get("todayTokens", 0),
+                            "requests": local.get("todayRequests", 0)})
+            elif d in days:
+                out.append({"date": d, "tokens": days[d].get("tokens", 0),
+                            "requests": days[d].get("requests", 0)})
+            else:
+                out.append({"date": d, "tokens": 0, "requests": 0})
+        return out
+    except Exception:  # noqa: BLE001 — a history failure never breaks refresh
+        return []
+
 
 # --------------------------------------------------------------------------- #
 # Document assembly
@@ -1236,6 +1316,7 @@ def build_document(settings: dict) -> dict:
         providers = [next(results) for _ in PROVIDERS]
     if local_enabled:
         local = merge_local([next(results) for _ in LOCAL_SCANNERS], days, now)
+        local["history"] = update_history(ctx, now, local, providers)
     plane_ns = time.monotonic_ns() - started
 
     return {

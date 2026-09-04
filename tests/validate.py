@@ -241,6 +241,21 @@ def main() -> int:
     sources = {s["source"] for s in local.get("sources", [])}
     check("all 5 sources reported",
           sources >= {"opencode", "claude", "codex", "qwen", "omp"}, str(sources))
+    # omp lane attribution: main sessions vs advisor vs spawned subagents.
+    omp_src = next((s for s in local.get("sources", []) if s["source"] == "omp"), None)
+    omp_exp = next((s for s in corpus["expected"]["sources"] if s["source"] == "omp"),
+                   None)
+    check("omp lanes golden (main/advisor/subagent)",
+          omp_src is not None and omp_exp is not None
+          and omp_src.get("lanes") == omp_exp.get("lanes"),
+          f'{omp_src and omp_src.get("lanes")} vs {omp_exp and omp_exp.get("lanes")}')
+    hist = local.get("history")
+    check("history 30 days", isinstance(hist, list) and len(hist) == 30,
+          f"len={len(hist) if isinstance(hist, list) else 'missing'}")
+    check("history today is live", isinstance(hist, list) and len(hist) == 30
+          and hist[-1]["date"] == today
+          and hist[-1]["tokens"] == local.get("todayTokens"),
+          str(hist[-1]) if isinstance(hist, list) and hist else "none")
     # ---- hygiene -------------------------------------------------------------- #
     # (1) generic credential-shaped strings, (2) the ACTUAL fixture secrets the
     # corpus writes (auth.json/copilot/kimi/deepseek/env file) — the old regex

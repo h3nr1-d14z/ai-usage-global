@@ -10,8 +10,8 @@ import qs.Ui
 // single-file pattern the four reference plugins use: this file is both the bar
 // chip and the popup panel. Data comes from engine/usage.py, which prints one
 // JSON document (quota windows per provider + local token consumption). Click
-// opens the panel; right/middle-click or 'R' refreshes; Esc closes; Tab walks
-// providers. The 1s nowMs ticker keeps every reset countdown honest while open.
+// opens the panel; right/middle-click or 'R' refreshes; Esc closes. The 1s
+// nowMs ticker keeps every reset countdown honest while open.
 // Key rows: clipboard paste (wl-clipboard) + show/hide mask, Enter saves; a
 // configured Qwen on the census fallback re-offers its paste row.
 Panel {
@@ -38,6 +38,15 @@ Panel {
   property bool loading: true
   property string errorText: ""
   property int viewTab: 0   // 0 = subscriptions, 1 = consumption
+  // How many paste-field TextInputs hold activeFocus. PanelKeyCatcher
+  // handles keys BeforeItem even for focused descendants — without this
+  // gate it hijacks j/k/h/l/x/r from the field and swallows the Enter
+  // that onAccepted needs ("Enter saves" only worked via the button).
+  property int keyFieldsFocused: 0
+  // Last observed window percents (provider:window -> percent) for the
+  // opt-in cap alerts; the first observation seeds silently so shell
+  // restarts never fire a stale alert.
+  property var lastWindowPercents: ({})
 
   // Ticks once a second while the shell is alive so countdowns stay honest.
   property double nowMs: Date.now()
@@ -187,13 +196,42 @@ Panel {
   }
 
   function persistSetting(key, value) {
-    root.close()
+    // No close(): the clock panel proves in-place entry updates survive
+    // updateEntryInline; closing here made every toggle feel like a crash.
     var entry = { id: root.moduleName }
     for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
     entry[key] = value
     root.settings = entry
     if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
       root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  // Opt-in desktop alert when a metered window crosses 90% (low -> high
+  // only; disabled resets the baseline so re-enabling starts fresh).
+  function checkCapAlerts(providers) {
+    if (String(root.setting("capAlerts", "Off")).toLowerCase() !== "on") {
+      root.lastWindowPercents = ({})
+      return
+    }
+    for (var i = 0; i < providers.length; i++) {
+      var p = providers[i]
+      if (!p.configured) continue
+      var windows = p.windows || []
+      for (var j = 0; j < windows.length; j++) {
+        var w = windows[j]
+        var pct = w.percent
+        if (pct === null || pct === undefined) continue
+        var key = p.id + ":" + (w.id || w.label)
+        var prev = root.lastWindowPercents[key]
+        root.lastWindowPercents[key] = pct
+        if (prev !== undefined && prev < 90 && pct >= 90) {
+          notifier.command = ["notify-send", "-a", "AI Usage", "-u", "normal",
+                              p.name + " · " + (w.label || w.id),
+                              pct + "% used · resets " + (w.resetsAt || "?")]
+          notifier.running = true
+        }
+      }
+    }
   }
 
   Timer {
@@ -223,6 +261,7 @@ Panel {
         try {
           var data = JSON.parse(output)
           root.providers = data.providers || []
+          root.checkCapAlerts(data.providers || [])
           root.local = data.local || {}
           // no-key/no-token/no-local-store/no-local-usage are expected
           // states for unconfigured providers; only real fetch failures
@@ -240,6 +279,11 @@ Panel {
     onExited: function(code) {
       if (code !== 0) { root.errorText = "engine exit " + code; root.loading = false }
     }
+  }
+
+  Process {
+    id: notifier
+    command: ["true"]
   }
 
   // ---- in-panel credential store (no file editing) ------------------------- //
@@ -336,6 +380,7 @@ Panel {
     PanelKeyCatcher {
       id: catcher
       anchors.fill: parent
+      blocked: root.keyFieldsFocused > 0
       onCloseRequested: root.close()
       onTabRequested: function (direction) {
         // Swallow Tab so it neither closes the panel nor falls through;
@@ -346,13 +391,25 @@ Panel {
         else if (t === "a" || t === "A") root.showAddRows = !root.showAddRows
         else if (t === "1") root.viewTab = 0
         else if (t === "2") root.viewTab = 1
+        else if (t === "3") root.viewTab = 2
       }
 
-      Column {
-        id: bodyColumn
-        width: parent.width
-        spacing: Style.space(12)
-        padding: Style.space(12)
+      // Scrollable once content outgrows the capped card (many providers,
+      // small screens); a no-op at equal heights.
+      Flickable {
+        id: scroller
+        anchors.fill: parent
+        contentWidth: width
+        contentHeight: bodyColumn.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+        Column {
+          id: bodyColumn
+          width: scroller.width
+          spacing: Style.space(12)
+          padding: Style.space(12)
 
         // Hero --------------------------------------------------------------- //
         Row {
@@ -393,10 +450,14 @@ Panel {
         Row {
           spacing: Style.space(6)
           Repeater {
-            model: ["Subscriptions", "Consumption"]
+            model: ["Subscriptions", "Consumption", "Settings"]
             delegate: Rectangle {
               required property int index
               required property var modelData
+              // Explicit: an unqualified `active` resolves to the window's
+              // focus state, painting BOTH tabs as active — the strip never
+              // actually showed which tab is selected.
+              readonly property bool active: root.viewTab === index
               width: tabLabel.implicitWidth + Style.space(16)
               height: tabLabel.implicitHeight + Style.space(8)
               radius: height / 2
@@ -564,6 +625,54 @@ Panel {
             }
           }
 
+          // 30-day local trend from persisted daily history (refresh-time
+          // snapshots — survives transcript compaction/rotation).
+          Column {
+            width: parent.width
+            spacing: 2
+            Rectangle {
+              width: parent.width
+              height: Style.space(40)
+              radius: Style.cornerRadius
+              color: root.alpha(root.foreground, 0.04)
+              Canvas {
+                id: trend
+                anchors.fill: parent
+                anchors.margins: Style.space(6)
+                property var series: (root.local && root.local.history) || []
+                onSeriesChanged: requestPaint()
+                onPaint: {
+                  var ctx = getContext("2d")
+                  ctx.clearRect(0, 0, width, height)
+                  var s = series
+                  if (!s || s.length === 0) return
+                  var maxTok = 1
+                  for (var i = 0; i < s.length; i++) maxTok = Math.max(maxTok, s[i].tokens || 0)
+                  var step = width / s.length
+                  var bw = Math.max(1, step * 0.62)
+                  for (var k = 0; k < s.length; k++) {
+                    var bh = Math.max(1, (s[k].tokens || 0) / maxTok * height)
+                    ctx.fillStyle = Qt.alpha(k === s.length - 1 ? accent : foreground,
+                                             k === s.length - 1 ? 0.95 : 0.45)
+                    ctx.fillRect(k * step + (step - bw) / 2, height - bh, bw, bh)
+                  }
+                }
+                readonly property color accent: root.accent
+                readonly property color foreground: root.foreground
+              }
+            }
+            Text {
+              width: parent.width
+              horizontalAlignment: Text.AlignHCenter
+              text: "30d trend · " + root.humanTokens(
+                      ((root.local && root.local.history) || [])
+                        .reduce(function (a, d) { return a + (d.tokens || 0) }, 0))
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+
           // Top models by tokens
           Text {
             text: "Models"
@@ -598,7 +707,7 @@ Panel {
                   radius: height / 2
                   color: root.alpha(root.foreground, 0.08)
                   Rectangle {
-                    width: parent.width * row.share
+                    width: Math.max(2, parent.width * row.share)
                     height: parent.height
                     radius: parent.radius
                     color: index === 0 ? root.accent : root.alpha(root.foreground, 0.45)
@@ -621,6 +730,32 @@ Panel {
             }
           }
 
+          // OMP lane split: main agents vs spawned subagents vs the advisor.
+          // Oneshot completion() calls (model roles) write no transcript —
+          // marked untracked instead of folded into a lane they never hit.
+          Text {
+            width: parent.width
+            visible: root.ompLanes() !== null
+            text: {
+              var l = root.ompLanes()
+              if (!l) return ""
+              var names = [["main", "main"], ["subagent", "subagents"],
+                           ["advisor", "advisor"]]
+              var parts = []
+              for (var i = 0; i < names.length; i++) {
+                var lane = l[names[i][0]]
+                if (lane && lane.tokens > 0)
+                  parts.push(names[i][1] + " " + root.humanTokens(lane.tokens))
+              }
+              if (parts.length > 0) parts.push("role calls untracked")
+              return "Lanes: " + parts.join(" · ")
+            }
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
           // Sources line
           Text {
             width: parent.width
@@ -637,13 +772,91 @@ Panel {
           }
         }
 
+        // ==== Tab 2: Settings ============================================== //
+        Column {
+          visible: root.viewTab === 2
+          width: parent.width - Style.space(24)
+          spacing: Style.space(14)
+
+          Text {
+            width: parent.width
+            text: "Settings persist to shell.json. Cap alerts notify on " +
+                  "desktop when a window crosses 90% — off by default."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+
+          SettingRow {
+            label: "Refresh every"
+            SettingPill {
+              value: root.refreshIntervalSec >= 3600
+                     ? (root.refreshIntervalSec / 3600) + "h"
+                     : (root.refreshIntervalSec / 60) + "m"
+              onClicked: {
+                var steps = [60, 300, 900, 3600]
+                var i = steps.indexOf(root.refreshIntervalSec)
+                root.persistSetting("refreshIntervalSec",
+                                    steps[(i + 1 + steps.length) % steps.length])
+              }
+            }
+          }
+
+          SettingRow {
+            label: "Default provider"
+            SettingPill {
+              value: {
+                var list = root.configuredProviders
+                if (list.length === 0) return "—"
+                var cur = root.providerById(root.defaultProviderId)
+                return cur ? (cur.display || cur.id) : list[0].display || list[0].id
+              }
+              onClicked: {
+                var list = root.configuredProviders
+                if (list.length === 0) return
+                var i = Math.max(0, list.findIndex(function (p) { return p.id === root.defaultProviderId }))
+                root.persistSetting("defaultProvider", list[(i + 1) % list.length].id)
+              }
+            }
+          }
+
+          SettingRow {
+            label: "Qwen census caps"
+            CapField { capKey: "qwenPlanCap5h"; capDefault: 6000; fieldLabel: "5h" }
+            CapField { capKey: "qwenPlanCapWeek"; capDefault: 45000; fieldLabel: "wk" }
+            CapField { capKey: "qwenPlanCapMonth"; capDefault: 90000; fieldLabel: "mo" }
+          }
+
+          SettingRow {
+            label: "Cap alerts ≥90%"
+            SettingPill {
+              value: String(root.setting("capAlerts", "Off"))
+              onClicked: root.persistSetting(
+                "capAlerts",
+                String(root.setting("capAlerts", "Off")) === "On" ? "Off" : "On")
+            }
+          }
+
+          SettingRow {
+            label: "Local usage"
+            SettingPill {
+              value: String(root.setting("showLocalConsumption", "On"))
+              onClicked: root.persistSetting(
+                "showLocalConsumption",
+                String(root.setting("showLocalConsumption", "On")) === "On" ? "Off" : "On")
+            }
+          }
+        }
+
         // Footer ------------------------------------------------------------- //
         Text {
           width: parent.width - Style.space(24)
-          text: "R refresh · A add · 1/2 tabs"
+          text: "R refresh · A add · 1/2/3 tabs"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
+        }
         }
       }
     }
@@ -668,6 +881,16 @@ Panel {
     return top
   }
 
+  // OMP transcript lanes (main / advisor / subagent) — null when the omp
+  // source is absent or carries no lane data.
+  function ompLanes() {
+    var srcs = (root.local && root.local.sources) || []
+    for (var i = 0; i < srcs.length; i++) {
+      if (srcs[i].source === "omp" && srcs[i].lanes) return srcs[i].lanes
+    }
+    return null
+  }
+
   // Weekday initials under the sparkline: last entry is today.
   function recentDayLabels() {
     var n = (root.local && root.local.recentDays || []).length
@@ -677,6 +900,99 @@ Panel {
       out.push(["S", "M", "T", "W", "T", "F", "S"][d.getDay()])
     }
     return out
+  }
+
+  // Settings row skeleton: caption label left, controls right.
+  component SettingRow: Row {
+    id: settingRow
+    property string label: ""
+    default property alias content: controls.data
+    width: parent ? parent.width : 0
+    spacing: Style.space(8)
+    Text {
+      id: settingLabel
+      anchors.verticalCenter: parent.verticalCenter
+      text: settingRow.label
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+    Item {
+      width: Math.max(0, parent.width - settingLabel.implicitWidth
+                      - controls.implicitWidth - parent.spacing * 2)
+      height: 1
+    }
+    Row { id: controls; spacing: Style.space(6) }
+  }
+
+  // Clickable value pill (cycle-style setting control).
+  component SettingPill: Rectangle {
+    id: pill
+    property string value: ""
+    signal clicked()
+    width: pillLabel.implicitWidth + Style.space(14)
+    height: pillLabel.implicitHeight + Style.space(8)
+    radius: height / 2
+    color: pillMouse.containsMouse ? root.alpha(root.foreground, 0.12)
+                                   : root.alpha(root.foreground, 0.06)
+    Text {
+      id: pillLabel
+      anchors.centerIn: parent
+      text: pill.value
+      color: pillMouse.containsMouse ? root.foreground : root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+    MouseArea {
+      id: pillMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: pill.clicked()
+    }
+  }
+
+  // Numeric census-cap field: label + digit input, Enter persists.
+  component CapField: Row {
+    id: capField
+    property string capKey: ""
+    property int capDefault: 0
+    property string fieldLabel: ""
+    spacing: Style.space(4)
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      text: capField.fieldLabel
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+    Rectangle {
+      width: Style.space(44)
+      height: capInput.implicitHeight + Style.space(6)
+      radius: Style.cornerRadius
+      color: root.alpha(root.foreground, 0.06)
+      border.color: capInput.activeFocus ? root.accent : "transparent"
+      border.width: 1
+      TextInput {
+        id: capInput
+        anchors.fill: parent
+        anchors.leftMargin: Style.space(6)
+        verticalAlignment: TextInput.AlignVCenter
+        text: String(root.setting(capField.capKey, capField.capDefault))
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        validator: IntValidator { bottom: 1; top: 1000000 }
+        inputMethodHints: Qt.ImhDigitsOnly
+        clip: true
+        onActiveFocusChanged: root.keyFieldsFocused += activeFocus ? 1 : -1
+        Keys.onEscapePressed: capInput.focus = false
+        onAccepted: {
+          var n = Number(text)
+          if (n > 0) root.persistSetting(capField.capKey, n)
+        }
+      }
+    }
   }
 
   // One provider: name, headline, meter bars per window with reset countdown.
@@ -804,6 +1120,10 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           selectByMouse: true
+          onActiveFocusChanged: root.keyFieldsFocused += activeFocus ? 1 : -1
+          // Esc while editing drops focus first; the next Esc closes the
+          // panel (catcher is blocked while a field holds focus).
+          Keys.onEscapePressed: keyInput.focus = false
           // TextInput has no placeholderText (that's TextField-only).
           Text {
             visible: keyInput.text === ""
