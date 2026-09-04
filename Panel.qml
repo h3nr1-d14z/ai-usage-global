@@ -213,6 +213,7 @@ Panel {
       root.lastWindowPercents = ({})
       return
     }
+    var firing = null
     for (var i = 0; i < providers.length; i++) {
       var p = providers[i]
       if (!p.configured) continue
@@ -225,12 +226,20 @@ Panel {
         var prev = root.lastWindowPercents[key]
         root.lastWindowPercents[key] = pct
         if (prev !== undefined && prev < 90 && pct >= 90) {
-          notifier.command = ["notify-send", "-a", "AI Usage", "-u", "normal",
-                              p.name + " · " + (w.label || w.id),
-                              pct + "% used · resets " + (w.resetsAt || "?")]
-          notifier.running = true
+          // One notification per refresh (highest crossing) — a Quickshell
+          // Process cannot queue; back-to-back command swaps would drop all
+          // but the last.
+          if (!firing || pct > firing.pct)
+            firing = { pct: pct, name: p.name, label: w.label || w.id,
+                       resets: w.resetsAt || "?" }
         }
       }
+    }
+    if (firing) {
+      notifier.command = ["notify-send", "-a", "AI Usage", "-u", "normal",
+                          firing.name + " · " + firing.label,
+                          firing.pct + "% used · resets " + firing.resets]
+      notifier.running = true
     }
   }
 
