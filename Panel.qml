@@ -93,8 +93,9 @@ Panel {
     return (p.display || "") + " " + hot.label + " " + Math.round(hot.percent) + "%"
   }
 
-  // Hover detail for the chip: every configured provider, one per line,
-  // default provider first — the chip itself shows only the default.
+  // Hover detail for the chip: one short line per configured provider —
+  // name, hottest window, its reset. The chip itself shows only the
+  // default provider; full per-window detail lives in the panel.
   function chipDetail() {
     var def = root.defaultRecord()
     var list = root.configuredProviders.filter(function (p) { return p !== def })
@@ -108,15 +109,19 @@ Panel {
         continue
       }
       var wins = (p.windows || []).filter(function (w) { return w && w.percent !== null })
-      var parts = []
-      for (var j = 0; j < wins.length; j++) {
-        var r = root.resetRemainingMs(wins[j].resetsAt)
-        parts.push(wins[j].label + " " + Math.round(wins[j].percent) + "%"
-                   + (r > 0 ? " ⟲" + root.formatReset(r) : ""))
-      }
-      lines.push((p.name || "") + (parts.length ? "  " + parts.join(" · ") : " —"))
+      var hot = null
+      for (var j = 0; j < wins.length; j++)
+        if (!hot || (wins[j].percent || 0) > (hot.percent || 0)) hot = wins[j]
+      if (!hot) { lines.push(p.name || ""); continue }
+      var r = root.resetRemainingMs(hot.resetsAt)
+      lines.push((p.name || "") + "  " + hot.label + " " + Math.round(hot.percent) + "%"
+                 + (r > 0 ? " · " + root.formatReset(r) : ""))
     }
-    return lines.join("\n")
+    // The live bar flattened "\n" (cause unverified — isolated tests with
+    // the exact string and structure break fine). "<br>" renders as a
+    // break under both plain AutoText and rich-text mode, so it is the
+    // robust separator here. Names/labels contain no < > &.
+    return lines.join("<br>")
   }
 
   // Console cookie missing/stale: fetch_qwen fell back to the local census.
