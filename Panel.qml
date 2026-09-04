@@ -93,17 +93,30 @@ Panel {
     return (p.display || "") + " " + hot.label + " " + Math.round(hot.percent) + "%"
   }
 
-  // Hover detail for the chip: every window with its reset countdown.
-  function chipDetail(p) {
-    if (!p) return "AI Usage Global — no data yet"
-    var wins = (p.windows || []).filter(function (w) { return w && w.percent !== null })
-    var parts = []
-    for (var i = 0; i < wins.length; i++) {
-      var r = root.resetRemainingMs(wins[i].resetsAt)
-      parts.push(wins[i].label + " " + Math.round(wins[i].percent) + "%"
-                 + (r > 0 ? " · " + root.formatReset(r) : ""))
+  // Hover detail for the chip: every configured provider, one per line,
+  // default provider first — the chip itself shows only the default.
+  function chipDetail() {
+    var def = root.defaultRecord()
+    var list = root.configuredProviders.filter(function (p) { return p !== def })
+    if (def) list.unshift(def)
+    if (list.length === 0) return "AI Usage Global — no data yet"
+    var lines = []
+    for (var i = 0; i < list.length; i++) {
+      var p = list[i]
+      if (p.kind === "balance" && p.label) {
+        lines.push((p.name || "") + "  " + p.label)
+        continue
+      }
+      var wins = (p.windows || []).filter(function (w) { return w && w.percent !== null })
+      var parts = []
+      for (var j = 0; j < wins.length; j++) {
+        var r = root.resetRemainingMs(wins[j].resetsAt)
+        parts.push(wins[j].label + " " + Math.round(wins[j].percent) + "%"
+                   + (r > 0 ? " ⟲" + root.formatReset(r) : ""))
+      }
+      lines.push((p.name || "") + (parts.length ? "  " + parts.join(" · ") : " —"))
     }
-    return (p.name || "") + (parts.length ? " — " + parts.join(" · ") : "")
+    return lines.join("\n")
   }
 
   // Console cookie missing/stale: fetch_qwen fell back to the local census.
@@ -271,7 +284,7 @@ Panel {
     visible: !root.barShowsData
     bar: root.bar
     text: "AI"
-    tooltipText: root.chipDetail(root.defaultRecord())
+    tooltipText: root.chipDetail()
     onPressed: function (buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
       else root.refresh()
@@ -285,7 +298,7 @@ Panel {
     visible: root.barShowsData
     bar: root.bar
     text: root.compactChip(root.defaultRecord())
-    tooltipText: root.chipDetail(root.defaultRecord())
+    tooltipText: root.chipDetail()
     active: true
     activeColor: {
       var p = root.defaultRecord()
