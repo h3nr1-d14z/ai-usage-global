@@ -200,8 +200,15 @@ commit (chip: short text `OC W 51%` + tone color — foreground <70 /
 accent ≥70 / urgent ≥90 via WidgetButton active/activeColor; full
 per-window detail moved to hover tooltip; dead `alarming` property
 removed; user direction: "just use color and a short text") → `baef0cd`
-trail → this commit (tooltip: user report — hover showed only the
-default provider; chipDetail now lists all configuredProviders, one
-per line, default first). Machine state: opencode key added by the
-user 2026-09-04 (defaultProvider defaults to opencode; qwen showed
-while opencode was unconfigured).
+commit (tooltip: user report — hover showed only the default provider;
+chipDetail now lists all configuredProviders, one per line, default
+first) → `735d7c8` trail → second "what else" round: cut the dead
+Tab-walk (selectedProvider/selected had no consumer since the footer
+rework; Tab now swallowed by the catcher), hover feedback on tabs /
+paste / show / Save / +add-provider, and the first-ever Consumption
+tab audit (wtype 2 while panel focus-catcher holds keyboard focus
+switches tabs headlessly — verified): model bars no longer use
+tone(share) (share 1.0 always tripped urgent-red — cap semantics leaked
+into a ranking), zero-token models filtered, sparkline gained weekday
+initials (today accented), model-name column 42→46%, active tab tint
+0.22→0.32. Machine state: opencode key added by the user 2026-09-04.
