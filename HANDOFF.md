@@ -188,9 +188,14 @@ dedup + ISO coverage → numeric-string resets, docstrings, gate log,
 handoff → `28608d0` placeholderText fix → `df9ba17` live-intl
 `DataV2.data.data` unwrap → `18cc1df`/`2650ac7`/`b9eb6dd` key-input UX +
 panel fit → `11baf86` credential hints wrap (no eliding) → `27026ab`/`451ab27`
-Linux verification record + trail → this commit (panel de-clutter:
-one number per window — no % echoes in header/detail; header status
+Linux verification record + trail → `6fbeef1`/`10c3352` panel de-clutter
+(one number per window — no % echoes in header/detail; header status
 slot = soonest reset for multi-window providers; footer help always
-visible; block spacing 14). Machine state: opencode key added by the
-user 2026-09-04 → bar chip now `OC 5h · W · M %` (defaultProvider
-setting defaults to opencode; qwen shows while opencode unconfigured).
+visible; block spacing 14) → this commit (user: "the ui is dumb as
+shit" — unconfigured paste rows now collapse behind a "+ add provider"
+toggle, click or A key; auto-expanded only while nothing configured;
+census-qwen re-offer still renders inside its configured block; the
+expanded filter is the pre-`6fbeef1` shownProviders shape). Machine
+state: opencode key added by the user 2026-09-04 → bar chip now
+`OC 5h · W · M %` (defaultProvider setting defaults to opencode; qwen
+showed while opencode was unconfigured).
