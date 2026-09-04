@@ -187,5 +187,10 @@ keys → `cfbcd23` Qwen console meter + test suites → `6935902` reset-time
 dedup + ISO coverage → numeric-string resets, docstrings, gate log,
 handoff → `28608d0` placeholderText fix → `df9ba17` live-intl
 `DataV2.data.data` unwrap → `18cc1df`/`2650ac7`/`b9eb6dd` key-input UX +
-panel fit → `11baf86` credential hints wrap (no eliding) → this commit
-(Linux verification record).
+panel fit → `11baf86` credential hints wrap (no eliding) → `27026ab`/`451ab27`
+Linux verification record + trail → this commit (panel de-clutter:
+one number per window — no % echoes in header/detail; header status
+slot = soonest reset for multi-window providers; footer help always
+visible; block spacing 14). Machine state: opencode key added by the
+user 2026-09-04 → bar chip now `OC 5h · W · M %` (defaultProvider
+setting defaults to opencode; qwen shows while opencode unconfigured).
