@@ -191,11 +191,14 @@ panel fit → `11baf86` credential hints wrap (no eliding) → `27026ab`/`451ab2
 Linux verification record + trail → `6fbeef1`/`10c3352` panel de-clutter
 (one number per window — no % echoes in header/detail; header status
 slot = soonest reset for multi-window providers; footer help always
-visible; block spacing 14) → this commit (user: "the ui is dumb as
-shit" — unconfigured paste rows now collapse behind a "+ add provider"
-toggle, click or A key; auto-expanded only while nothing configured;
+visible; block spacing 14) → `9883e58`/`8f2ddbe` user: "the ui is dumb as
+shit" — unconfigured paste rows collapse behind a "+ add provider"
+toggle (click or A key; auto-expanded only while nothing configured;
 census-qwen re-offer still renders inside its configured block; the
-expanded filter is the pre-`6fbeef1` shownProviders shape). Machine
-state: opencode key added by the user 2026-09-04 → bar chip now
-`OC 5h · W · M %` (defaultProvider setting defaults to opencode; qwen
-showed while opencode was unconfigured).
+expanded filter is the pre-`6fbeef1` shownProviders shape) → this
+commit (chip: short text `OC W 51%` + tone color — foreground <70 /
+accent ≥70 / urgent ≥90 via WidgetButton active/activeColor; full
+per-window detail moved to hover tooltip; dead `alarming` property
+removed; user direction: "just use color and a short text"). Machine
+state: opencode key added by the user 2026-09-04 (defaultProvider
+defaults to opencode; qwen showed while opencode was unconfigured).
