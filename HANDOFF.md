@@ -236,3 +236,18 @@ Consumption, 2px model-bar floor. persistSetting no longer closes the panel
 (clock-panel pattern). All three tabs visually verified post-deploy; gate
 4× PASSED with lanes + history checks; metrics stable
 (tokens_scanned=1012451417 / requests_scanned=31500 at corpus v7).
+
+`a5980e7` trail → advisory follow-up (claimed flat model_usage records were
+dropped by extract_omp): the advisory's evidence was self-referential — the
+only model_usage/auto-thinking strings in OUR transcripts were our own tool
+outputs and the advisory text itself — but the record type is REAL: two
+genuine auto-thinking probe records (role:"tiny", flat top-level usage,
+non-duplicative against assistant messages) in -.omp-agent/2026-09-03T20-14.
+Shipped: extract_omp model_usage branch + walk_jsonl per-record lane router
+(probes attribute to a shared roles lane from any file); explicit
+completion() oneshots still leave NO record (re-verified post-flush —
+my earlier mtime-watch conclusion stands); panel suffix now "oneshots
+unlogged". Corpus v8 golden (+80 requests, 15 models). Live-verified:
+Lanes line renders "… roles 668 · oneshots unlogged". Stale advisories
+(blocked-gate, active-tab, harness-cap) arrived after those fixes shipped —
+ignored. Metrics at v8: tokens_scanned=1012768276 / requests_scanned=31580.
