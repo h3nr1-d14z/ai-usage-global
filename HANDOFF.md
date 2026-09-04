@@ -199,6 +199,9 @@ expanded filter is the pre-`6fbeef1` shownProviders shape) → this
 commit (chip: short text `OC W 51%` + tone color — foreground <70 /
 accent ≥70 / urgent ≥90 via WidgetButton active/activeColor; full
 per-window detail moved to hover tooltip; dead `alarming` property
-removed; user direction: "just use color and a short text"). Machine
-state: opencode key added by the user 2026-09-04 (defaultProvider
-defaults to opencode; qwen showed while opencode was unconfigured).
+removed; user direction: "just use color and a short text") → `baef0cd`
+trail → this commit (tooltip: user report — hover showed only the
+default provider; chipDetail now lists all configuredProviders, one
+per line, default first). Machine state: opencode key added by the
+user 2026-09-04 (defaultProvider defaults to opencode; qwen showed
+while opencode was unconfigured).
