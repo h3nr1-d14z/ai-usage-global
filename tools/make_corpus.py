@@ -38,7 +38,7 @@ from pathlib import Path
 # os.environ/tzset games — nothing can be silently overridden by the shell.
 UTC = dt.timezone.utc
 
-CORPUS_VERSION = 7  # v7: omp lanes (advisor + subagent transcripts)
+CORPUS_VERSION = 8  # v8: omp model_usage records (roles lane)
 
 # Fixed anchor: 2026-09-03T12:00:00Z. Pinned so window math is reproducible.
 FIXED_NOW_MS = int(dt.datetime(2026, 9, 3, 12, 0, 0, tzinfo=dt.timezone.utc)
@@ -63,6 +63,7 @@ PROFILES = {
     "omp-default": (5000, 460, 26000, 300, 320),
     "omp-advisor-fast": (900, 120, 4200, 0, 60),
     "omp-sub-scout": (2600, 210, 9800, 0, 140),
+    "omp-role-tiny": (300, 40, 160, 0, 30),
 }
 
 # Dollars per million tokens: (in, out, cacheRead, cacheWrite)
@@ -81,6 +82,7 @@ PRICING = {
     "omp-default": (1.0, 4.0, 0.1, 1.25),
     "omp-advisor-fast": (0.3, 1.1, 0.05, 0.0),
     "omp-sub-scout": (0.4, 1.6, 0.06, 0.0),
+    "omp-role-tiny": (0.2, 0.8, 0.04, 0.0),
 }
 
 
@@ -296,15 +298,17 @@ def write_qwen(home: Path, rng: random.Random, expect: Expect) -> dict:
 
 
 def write_omp(home: Path, rng: random.Random, expect: Expect) -> dict:
-    """v7: besides the 4x6 top-level main sessions, every third session dir
-    gains an __advisor.jsonl and every other third a named subagent
-    transcript (Scout.jsonl) — the lane shapes scan_omp attributes."""
+    """v8: the v7 lane shapes plus interleaved model_usage records —
+    internal role calls (auto-thinking probes) that ride inside main and
+    advisor files yet attribute to the shared roles lane."""
     n = 0
     lanes = {"main": {"tokens": 0, "requests": 0},
              "advisor": {"tokens": 0, "requests": 0},
-             "subagent": {"tokens": 0, "requests": 0}}
+             "subagent": {"tokens": 0, "requests": 0},
+             "roles": {"tokens": 0, "requests": 0}}
 
-    def write(path: Path, model: str, count: int, lane: str) -> None:
+    def write(path: Path, model: str, count: int, lane: str,
+              usage_records: int = 0) -> None:
         nonlocal n
         lines = []
         for _ in range(count):
@@ -336,17 +340,44 @@ def write_omp(home: Path, rng: random.Random, expect: Expect) -> dict:
                     },
                 },
             }, separators=(",", ":")))
+        for _ in range(usage_records):
+            t = tokens_for("omp-role-tiny", rng)
+            ms = FIXED_NOW_MS - rng.randrange(0, 30 * DAY_MS)
+            cost = cost_for("omp-role-tiny", t)
+            expect.add("omp-role-tiny", t, cost)
+            expect.add_day(ms, t["input"] + t["output"] + t["cacheRead"]
+                           + t["cacheWrite"] + t["reasoning"])
+            n += 1
+            lanes["roles"]["requests"] += 1
+            lanes["roles"]["tokens"] += (t["input"] + t["output"] + t["cacheRead"]
+                                         + t["cacheWrite"] + t["reasoning"])
+            lines.append(json.dumps({
+                "type": "model_usage",
+                "timestamp": ms,
+                "purpose": "auto-thinking",
+                "role": "tiny",
+                "model": "omp-role-tiny",
+                "usage": {
+                    "input": t["input"], "output": t["output"],
+                    "cacheRead": t["cacheRead"], "cacheWrite": t["cacheWrite"],
+                    "reasoningTokens": t["reasoning"],
+                    "totalTokens": t["input"] + t["output"] + t["cacheRead"],
+                    "cost": {"total": cost},
+                },
+            }, separators=(",", ":")))
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     for proj_index in range(4):
         folder = home / ".omp/agent/sessions" / f"-workspace-x{proj_index}"
         folder.mkdir(parents=True, exist_ok=True)
         for session in range(6):
-            write(folder / f"{session:04d}.jsonl", "omp-default", 40, "main")
+            write(folder / f"{session:04d}.jsonl", "omp-default", 40, "main",
+                  usage_records=3)
             if session % 3 == 1:
                 sub = folder / f"{session:04d}"
                 sub.mkdir(parents=True, exist_ok=True)
-                write(sub / "__advisor.jsonl", "omp-advisor-fast", 12, "advisor")
+                write(sub / "__advisor.jsonl", "omp-advisor-fast", 12, "advisor",
+                      usage_records=1)
             elif session % 3 == 2:
                 sub = folder / f"{session:04d}"
                 sub.mkdir(parents=True, exist_ok=True)

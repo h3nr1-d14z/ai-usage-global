@@ -739,9 +739,10 @@ Panel {
             }
           }
 
-          // OMP lane split: main agents vs spawned subagents vs the advisor.
-          // Oneshot completion() calls (model roles) write no transcript —
-          // marked untracked instead of folded into a lane they never hit.
+          // OMP lane split: main agents vs spawned subagents vs the advisor,
+          // plus recorded role calls (model_usage records — auto-thinking
+          // probes). Explicit completion() oneshots still write no record;
+          // that residual gap is flagged, not folded into a lane.
           Text {
             width: parent.width
             visible: root.ompLanes() !== null
@@ -749,14 +750,14 @@ Panel {
               var l = root.ompLanes()
               if (!l) return ""
               var names = [["main", "main"], ["subagent", "subagents"],
-                           ["advisor", "advisor"]]
+                           ["advisor", "advisor"], ["roles", "roles"]]
               var parts = []
               for (var i = 0; i < names.length; i++) {
                 var lane = l[names[i][0]]
                 if (lane && lane.tokens > 0)
                   parts.push(names[i][1] + " " + root.humanTokens(lane.tokens))
               }
-              if (parts.length > 0) parts.push("role calls untracked")
+              if (parts.length > 0) parts.push("oneshots unlogged")
               return "Lanes: " + parts.join(" · ")
             }
             color: root.dim

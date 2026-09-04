@@ -878,13 +878,15 @@ def _row(ms: int, model: str, inp: int, out: int, cr: int, cw: int, rs: int,
 
 def walk_jsonl(label: str, files: list[str], extract, models: dict,
                days: DayIndex, dtok: list, dreq: list, observe=None,
-               sink: dict | None = None) -> dict:
+               sink: dict | None = None, lane_of=None) -> dict:
     """Shared skeleton: json.loads per line, extractor returns
     (ms, model, inp, out, cr, cw, rs, cost) or None to skip. observe(d, ms)
     is called for every parsed line before extraction (used by the qwen
     scan to feed the plan census without a second pass). sink, when given,
-    accumulates this call's tokens/requests — scan_omp uses it to attribute
-    transcript lanes (main / advisor / subagent) without a second read."""
+    accumulates tokens/requests — scan_omp uses it to attribute transcript
+    lanes (main / advisor / subagent / roles) without a second read:
+    lane_of(d) maps the RAW record to a bucket key ("" when no router),
+    so interleaved record kinds in one file still land in their lane."""
     n_req = 0
     seen_models: set[str] = set()
     for path in files:
@@ -909,8 +911,13 @@ def walk_jsonl(label: str, files: list[str], extract, models: dict,
                     _row(*rec, models, days, dtok, dreq)
                     n_req += 1
                     if sink is not None:
-                        sink["tokens"] += rec[2] + rec[3] + rec[4] + rec[5] + rec[6]
-                        sink["requests"] += 1
+                        key = lane_of(d) if lane_of is not None else ""
+                        bucket = sink.get(key)
+                        if bucket is None:
+                            bucket = sink[key] = {"tokens": 0, "requests": 0}
+                        bucket["tokens"] += (rec[2] + rec[3] + rec[4]
+                                             + rec[5] + rec[6])
+                        bucket["requests"] += 1
         except OSError:
             continue
     return {"source": label, "requests": n_req, "models": sorted(seen_models)}
@@ -959,7 +966,24 @@ def extract_codex(d):
 
 
 def extract_omp(d):
-    if not isinstance(d, dict) or d.get("type") != "message":
+    if not isinstance(d, dict):
+        return None
+    if d.get("type") == "model_usage":
+        # Internal role calls (auto-thinking probes on a tiny model): flat
+        # record, usage at the top level, no nested message. Verified
+        # non-duplicative — the probed calls never also appear as
+        # assistant messages. Explicit completion() oneshots write no
+        # record at all; that gap stays open.
+        u = d.get("usage") or {}
+        if not isinstance(u, dict) or not u:
+            return None
+        cost = (u.get("cost") or {}).get("total") if isinstance(u.get("cost"), dict) else None
+        return (parse_ts_ms(d.get("timestamp")),
+                str(d.get("model") or "omp"),
+                int(finite(u.get("input"))), int(finite(u.get("output"))),
+                int(finite(u.get("cacheRead"))), int(finite(u.get("cacheWrite"))),
+                int(finite(u.get("reasoningTokens"))), finite(cost))
+    if d.get("type") != "message":
         return None
     m = d.get("message") or {}
     if m.get("role") != "assistant":
@@ -1008,10 +1032,11 @@ def scan_omp(ctx: dict, models: dict, days: DayIndex, dtok: list, dreq: list) ->
     """OMP transcripts carry a lane structure: top-level session files are
     the main agents, __advisor.jsonl inside a session dir is the advisor,
     and any other nested file (named after the subagent) is a spawned
-    subagent. Lanes are attributed per file so the panel can show the
-    split. Oneshot completion() calls (model roles) write no transcript
+    subagent. Lanes are attributed per file; model_usage records (internal
+    role calls) are routed to a shared "roles" bucket regardless of which
+    file they sit in. Explicit completion() oneshots write no transcript
     anywhere on disk — a runtime gap this engine cannot close; the panel
-    reports that lane as untracked rather than folding it in."""
+    marks those unlogged."""
     root = ctx["home"] / ".omp/agent/sessions"
     files = sorted(glob.glob(str(root / "**/*.jsonl"), recursive=True))
     groups: dict[str, list[str]] = {"main": [], "advisor": [], "subagent": []}
@@ -1023,15 +1048,26 @@ def scan_omp(ctx: dict, models: dict, days: DayIndex, dtok: list, dreq: list) ->
             groups["main"].append(f)
         else:
             groups["subagent"].append(f)
+
+    def lane_router(native: str):
+        def lane_of(d: dict) -> str:
+            return "roles" if d.get("type") == "model_usage" else native
+        return lane_of
+
     src: dict = {"source": "omp", "requests": 0, "models": []}
     lanes: dict[str, dict] = {}
     for lane in ("main", "advisor", "subagent"):
-        sink = {"tokens": 0, "requests": 0}
+        sink: dict[str, dict] = {}
         s = walk_jsonl("omp", groups[lane], extract_omp, models, days, dtok, dreq,
-                       sink=sink)
+                       sink=sink, lane_of=lane_router(lane))
         src["requests"] += s["requests"]
         src["models"] = sorted(set(src["models"]) | set(s["models"]))
-        lanes[lane] = sink
+        for sub, b in sink.items():
+            tgt = lanes.get(sub)
+            if tgt is None:
+                tgt = lanes[sub] = {"tokens": 0, "requests": 0}
+            tgt["tokens"] += b["tokens"]
+            tgt["requests"] += b["requests"]
     src["lanes"] = lanes
     return src
 
