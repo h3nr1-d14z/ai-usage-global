@@ -37,7 +37,6 @@ Panel {
   property var local: ({})
   property bool loading: true
   property string errorText: ""
-  property int selectedProvider: 0
   property int viewTab: 0   // 0 = subscriptions, 1 = consumption
 
   // Ticks once a second while the shell is alive so countdowns stay honest.
@@ -63,8 +62,6 @@ Panel {
     return p && (p.configured || (root.showAddRows && (p.keyEnv || "") !== ""))
   })
   readonly property var configuredProviders: (root.providers || []).filter(function (p) { return p && p.configured })
-  readonly property var selected: shownProviders.length > 0
-    ? shownProviders[Math.min(selectedProvider, shownProviders.length - 1)] : null
 
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
@@ -341,9 +338,8 @@ Panel {
       anchors.fill: parent
       onCloseRequested: root.close()
       onTabRequested: function (direction) {
-        // Tab walks providers within the subscriptions tab.
-        var n = root.shownProviders.length
-        if (n > 0) root.selectedProvider = (root.selectedProvider + direction + n) % n
+        // Swallow Tab so it neither closes the panel nor falls through;
+        // the invisible provider-selection walk was removed.
       }
       onTextKey: function (t) {
         if (t === "r" || t === "R") root.refresh()
@@ -404,20 +400,24 @@ Panel {
               width: tabLabel.implicitWidth + Style.space(16)
               height: tabLabel.implicitHeight + Style.space(8)
               radius: height / 2
-              color: active ? root.alpha(root.accent, 0.22) : root.alpha(root.foreground, 0.06)
+              color: active ? root.alpha(root.accent, 0.22)
+                            : (tabMouse.containsMouse ? root.alpha(root.foreground, 0.12)
+                                                      : root.alpha(root.foreground, 0.06))
               border.color: active ? root.accent : "transparent"
               border.width: active ? 1 : 0
               Text {
                 id: tabLabel
                 anchors.centerIn: parent
                 text: modelData
-                color: active ? root.foreground : root.dim
+                color: active || tabMouse.containsMouse ? root.foreground : root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 font.bold: active
               }
               MouseArea {
+                id: tabMouse
                 anchors.fill: parent
+                hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.viewTab = index
               }
@@ -443,17 +443,20 @@ Panel {
             width: parent.width
             height: addRowLabel.implicitHeight + Style.space(10)
             radius: Style.cornerRadius
-            color: root.alpha(root.foreground, 0.04)
+            color: addPillMouse.containsMouse ? root.alpha(root.foreground, 0.09)
+                                             : root.alpha(root.foreground, 0.04)
             Text {
               id: addRowLabel
               anchors.centerIn: parent
               text: root.showAddRows ? "− hide" : "+ add provider"
-              color: root.dim
+              color: addPillMouse.containsMouse ? root.foreground : root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
             MouseArea {
+              id: addPillMouse
               anchors.fill: parent
+              hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
               onClicked: root.showAddRows = !root.showAddRows
             }
@@ -614,7 +617,7 @@ Panel {
         // Footer ------------------------------------------------------------- //
         Text {
           width: parent.width - Style.space(24)
-          text: "R refresh · Tab provider · A add · 1/2 tabs"
+          text: "R refresh · A add · 1/2 tabs"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -791,18 +794,21 @@ Panel {
           spacing: Style.space(8)
           Text {
             text: "paste"
-            color: clipReader.running ? root.accent : root.dim
+            color: clipReader.running ? root.accent
+                  : (pasteMouse.containsMouse ? root.foreground : root.dim)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
-            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor;
+            MouseArea { id: pasteMouse; anchors.fill: parent; hoverEnabled: true;
+                        cursorShape: Qt.PointingHandCursor;
                         onClicked: if (!clipReader.running) clipReader.running = true }
           }
           Text {
             text: keyInput.echoMode === TextInput.Password ? "show" : "hide"
-            color: root.dim
+            color: showMouse.containsMouse ? root.foreground : root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
-            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor;
+            MouseArea { id: showMouse; anchors.fill: parent; hoverEnabled: true;
+                        cursorShape: Qt.PointingHandCursor;
                         onClicked: keyInput.echoMode =
                           (keyInput.echoMode === TextInput.Password)
                             ? TextInput.Normal : TextInput.Password }
@@ -814,19 +820,24 @@ Panel {
         width: saveKeyLabel.implicitWidth + Style.space(14)
         height: keyField.height
         radius: Style.cornerRadius
-        color: keyInput.text.length > 0 ? root.accent : root.alpha(root.foreground, 0.08)
+        color: keyInput.text.length > 0 ? root.accent
+              : (saveMouse.containsMouse ? root.alpha(root.foreground, 0.14)
+                                         : root.alpha(root.foreground, 0.08))
         Text {
           id: saveKeyLabel
           anchors.centerIn: parent
           text: root.keyAddPending === block.p.keyEnv && keyAdder.running
                 ? "saving…" : "Save"
-          color: keyInput.text.length > 0 ? "#111111" : root.dim
+          color: keyInput.text.length > 0 ? "#111111"
+                : (saveMouse.containsMouse ? root.foreground : root.dim)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           font.bold: true
         }
         MouseArea {
+          id: saveMouse
           anchors.fill: parent
+          hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
           onClicked: if (keyInput.text.length > 0) {
             root.addKey(block.p.keyEnv, keyInput.text)
