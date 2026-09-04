@@ -212,3 +212,27 @@ tone(share) (share 1.0 always tripped urgent-red — cap semantics leaked
 into a ranking), zero-token models filtered, sparkline gained weekday
 initials (today accented), model-name column 42→46%, active tab tint
 0.22→0.32. Machine state: opencode key added by the user 2026-09-04.
+
+`be80e01` trail → third "do it all" round (user: "lets do it" + "in omp we
+also use subagent and roles too and we havent count the token of them yet"):
+audit PROVED task-subagent transcripts (sessions/<proj>/<sess>/<Name>.jsonl)
+and advisor transcripts were already globbed+counted — spawned QuixoticCougar
+live and watched its 39.9K tokens land; the real gap is attribution (one
+blended number) and oneshot completion() role calls, which write NO
+transcript anywhere (model_perf is a decaying perf window, client_usage is
+empty) — uncountable from disk, marked "role calls untracked" in the panel.
+scan_omp now attributes lanes (main/advisor/subagent) with corpus v7 golden.
+Found + fixed while verifying Tab routing: key-field focus never blocked the
+PanelKeyCatcher, so typing j/k/h/l/x into a paste field was hijacked and
+Enter never reached onAccepted; and the tab strip's unqualified `active`
+resolved to WINDOW focus state (both tabs painted active — qml6 headless
+test proved it; explicit viewTab === index now). Also shipped: Settings tab
+(refresh interval, default provider, Qwen census caps, opt-in ≥90% cap
+alerts via notify-send — off by default, crossing-only, one per refresh —
+local-usage toggle), scrollable content (Flickable, no-op at equal heights),
+persisted daily history (~/.local/state/h3nr1.d14z.ai-usage/history.json,
+60d cap, provider caps ride along unsurfaced) + 30d trend bars in
+Consumption, 2px model-bar floor. persistSetting no longer closes the panel
+(clock-panel pattern). All three tabs visually verified post-deploy; gate
+4× PASSED with lanes + history checks; metrics stable
+(tokens_scanned=1012451417 / requests_scanned=31500 at corpus v7).
