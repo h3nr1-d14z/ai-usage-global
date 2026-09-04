@@ -28,8 +28,7 @@ PY="${PYTHON:-python3}"
 
 # 2. Correctness gate — fail fast, never emit metrics on a broken engine.
 for t in tests/validate.py tests/test_sql_fallback.py tests/test_add_key.py \
-         tests/test_qwen_console.py; do
-  echo "== $t ==" >> bench/last-validation.log
+         tests/test_qwen_console.py tests/test_newapi.py; do
   if ! "$PY" "$t" >> bench/last-validation.log 2>&1; then
     echo "VALIDATION FAILED ($t) — see bench/last-validation.log" >&2
     tail -n 20 bench/last-validation.log >&2 || true

@@ -11,6 +11,8 @@ Layout produced under --out:
   home/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl Codex CLI rollouts
   home/.qwen/projects/<proj>/chats/<chat>.jsonl    Qwen Code CLI (Coding Plan)
   home/.omp/agent/sessions/<p>/<s>.jsonl           Oh My Pi sessions
+  home/.omp/agent/models.yml                    OMP provider registry (new-api gateways)
+  home/.omp/agent/.env                          OMP dotenv (gateway API keys)
   home/.local/share/opencode/opencode.db           OpenCode SQLite (messages)
   home/.local/share/opencode/auth.json             opencode-go key entry
   home/.config/gh/hosts.yml                        Copilot OAuth token
@@ -38,8 +40,7 @@ from pathlib import Path
 # os.environ/tzset games — nothing can be silently overridden by the shell.
 UTC = dt.timezone.utc
 
-CORPUS_VERSION = 8  # v8: omp model_usage records (roles lane)
-
+CORPUS_VERSION = 9  # v9: new-api gateway (models.yml + .env + billing fixtures)
 # Fixed anchor: 2026-09-03T12:00:00Z. Pinned so window math is reproducible.
 FIXED_NOW_MS = int(dt.datetime(2026, 9, 3, 12, 0, 0, tzinfo=dt.timezone.utc)
                    .timestamp() * 1000)
@@ -467,6 +468,32 @@ def write_credentials(home: Path) -> None:
     (home / ".deepseek/config.toml").write_text(
         '[default]\napi_key = "sk-fixtured-deepseek-key"\n', encoding="utf-8")
 
+    # OMP provider registry: new-api gateway discovery input. agentrouter is
+    # the live gateway (env-name key resolved from OMP's own .env); trollllm
+    # shares a host with trollllm-anthropic (dedup) and is not new-api (no
+    # fixtures → dropped); qwen collides with the static quota registry
+    # (skipped, and its literal key must never leak into the document).
+    agent = home / ".omp/agent"
+    agent.mkdir(parents=True, exist_ok=True)
+    (agent / "models.yml").write_text(
+        "providers:\n"
+        "  agentrouter:\n"
+        "    baseUrl: https://gw.fixture.invalid\n"
+        "    api: anthropic-messages\n"
+        "    apiKey: AGENTROUTER_API_KEY\n"
+        "  trollllm:\n"
+        "    baseUrl: https://chat.fixture.invalid/v1\n"
+        "    apiKey: TROLLLLM_API_KEY\n"
+        "  trollllm-anthropic:\n"
+        "    baseUrl: https://chat.fixture.invalid\n"
+        "    apiKey: TROLLLLM_API_KEY\n"
+        "  qwen:\n"
+        "    baseUrl: https://qwen.fixture.invalid\n"
+        "    apiKey: sk-literal-qwen-fixture\n", encoding="utf-8")
+    (agent / ".env").write_text(
+        "AGENTROUTER_API_KEY=sk-fixtured-newapi-key\n"
+        "TROLLLLM_API_KEY=sk-fixtured-trollllm-key\n", encoding="utf-8")
+
 
 def write_fixtures(out: Path) -> None:
     """Quota-plane fixtures: the exact response shapes the live endpoints
@@ -527,6 +554,18 @@ def write_fixtures(out: Path) -> None:
         "DEEPSEEK_API_KEY=sk-ds-env-key\n"
         "GITHUB_TOKEN=gho_env_copilot_token\n", encoding="utf-8")
 
+    # new-api gateway (agentrouter): status signature + OpenAI-style billing
+    # (total_usage is US cents; hard_limit_usd 1e8 = new-api's "unlimited").
+    # Live shapes source-verified against agentrouter.org 2026-09-05.
+    dump("newapi-agentrouter.status.json",
+         {"data": {"system_name": "Fixture Router", "version": "init-fixture"}})
+    dump("newapi-agentrouter.subscription.json",
+         {"object": "billing_subscription", "has_payment_method": True,
+          "soft_limit_usd": 100000000, "hard_limit_usd": 100000000,
+          "system_hard_limit_usd": 100000000, "access_until": 0})
+    dump("newapi-agentrouter.usage.json", {"object": "list",
+                                           "total_usage": 3792.6399})
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate the benchmark corpus")
@@ -538,6 +577,10 @@ def main() -> int:
 
     out = Path(args.out).resolve()
     manifest_path = out / "corpus.json"
+    # Engine-written state is not corpus: stale history snapshots would make
+    # day-relative goldens (new-api today-spend) drift between runs.
+    shutil.rmtree(out / "home" / ".local/state/h3nr1.d14z.ai-usage",
+                  ignore_errors=True)
     if manifest_path.is_file() and not args.force:
         try:
             existing = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -585,6 +628,17 @@ def main() -> int:
                             "requests": expect.day_requests[d]}
                            for d in expect.day_dates],
             "sources": sources,
+            # new-api gateway record exactly as the engine emits it
+            # (fixture lifetime 3792.6399 cents; uncapped; fresh corpus has
+            # no spend history, so no today-figure in the detail line).
+            "newapi": {
+                "id": "agentrouter", "name": "Fixture Router",
+                "display": "FR", "configured": True, "kind": "balance",
+                "label": "$37.93", "value": 37.93, "currency": "$",
+                "detail": "new-api · Fixture Router", "windows": [],
+                "error": None, "keyEnv": "AGENTROUTER_API_KEY",
+                "newapi": True,
+            },
         },
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True),

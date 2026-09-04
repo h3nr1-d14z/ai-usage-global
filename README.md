@@ -7,6 +7,9 @@ chip, one panel, every provider you actually pay for.
 - **OpenCode Go**, **OpenRouter**, **Kimi / Moonshot**, **ZAI / GLM**,
   **DeepSeek**, **GitHub Copilot**, and **Alibaba Cloud Coding Plan (Qwen)** —
   meter bars, credit balances, live reset countdowns.
+- **New-API gateways** ([QuantumNous/new-api](https://github.com/QuantumNous/new-api), e.g. Agent Router) —
+  discovered automatically from OMP's provider registry; lifetime + daily
+  spend in USD straight from the gateway's billing API.
 - **Local consumption** scanned from the agent stores already on your disk:
   OpenCode SQLite, Claude Code / Codex / Qwen Code / OMP transcripts. Per-model
   tokens, 7-day history, today/week/all totals. Read-only; nothing leaves the
@@ -47,6 +50,7 @@ Providers appear as soon as their credential exists — no restart needed.
 | DeepSeek | `DEEPSEEK_API_KEY` | `~/.deepseek/config.toml` |
 | Copilot | `GITHUB_TOKEN` / `GH_TOKEN` | `~/.config/gh/hosts.yml` |
 | Qwen Coding Plan | (none — see below) | local transcripts |
+| New-API gateway | (auto — see below) | `~/.omp/agent/models.yml` + `~/.omp/agent/.env` |
 
 The engine reads credentials from, lowest to highest precedence:
 
@@ -86,6 +90,21 @@ session cookie, and that is what the widget uses when available:
 The cookie is a session credential: it is used for the two gateway requests
 and never written to the emitted document or logs (asserted by tests).
 
+### New-API gateways (Agent Router & friends)
+
+Any OMP provider whose host speaks the [QuantumNous/new-api](https://github.com/QuantumNous/new-api) console API is
+picked up automatically: `~/.omp/agent/models.yml` provides the `baseUrl`
+and the key (an env-name entry resolves against `~/.omp/agent/.env`, the
+file OMP itself loads — a literal `apiKey:` works too). The widget calls the
+gateway's OpenAI-compatible billing endpoints and shows the token's
+**lifetime spend** (`total_usage`, US cents) plus a per-day figure derived
+from the persisted history snapshots — the first day seeds silently, the
+"$ today" line appears from day two. Quota-capped tokens additionally get
+a spend meter; new-api's "unlimited" sentinel (`1e8`) renders as uncapped.
+Some forks ignore the billing date params (Agent Router does), which is why
+the engine treats the figure as lifetime-cumulative. Hosts that fail the
+`/api/status` signature check (or aren't new-api at all) drop out silently.
+
 ## Settings (`omarchy bar set h3nr1.d14z.ai-usage <key> <value>`)
 
 | Key | Default | Effect |
@@ -99,7 +118,7 @@ and never written to the emitted document or logs (asserted by tests).
 ## Interactions
 
 - Left click: panel. Right/middle click: refresh.
-- `R` refresh · `1`/`2` switch tabs · `Tab` walks providers · `Esc` closes.
+- `R` refresh · `1`/`2`/`3` switch tabs · `Tab` walks providers · `Esc` closes.
 - Meter tone: foreground → accent past 70% → urgent red past 90%.
 
 ## Development

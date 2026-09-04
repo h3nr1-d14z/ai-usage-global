@@ -29,6 +29,7 @@ plans, plus a local-cost plane. Two layers, deliberately separated:
 | OpenRouter / Kimi / ZAI / DeepSeek / Alibaba | vendor quota APIs | `*_API_KEY` env |
 | Qwen Coding Plan | **console gateway** (real %) → **transcript census** fallback | cookie (see below) |
 | Cursor | local state.vscdb | auto-detected |
+| New-API gateways (Agent Router) | **billing endpoints** (lifetime $, US-cents `total_usage`) | models.yml env-name → `~/.omp/agent/.env` |
 
 ### Qwen — the long saga, resolved
 
@@ -51,6 +52,33 @@ plans, plus a local-cost plane. Two layers, deliberately separated:
   never enters the emitted document (test-asserted).
 - Gateway reset-time types are sloppy (epoch s, ms, numeric strings, ISO)
   — `_reset_ms()` tolerates all four; pinned by tests.
+
+
+### New-API gateways — how it works
+
+- Discovery is disk-only: `newapi_gateways()` parses `~/.omp/agent/models.yml`
+  `providers:` (2-space/4-space subset parser), resolves `apiKey` env-names
+  against `~/.omp/agent/.env` (the file OMP loads — the panel process does
+  NOT inherit OMP's env) then the panel's own env store, dedupes by host,
+  and skips static-registry ids. `fetch_newapi()` then confirms new-api-ness
+  via `GET /api/status` (needs `data.system_name` + `data.version`); any
+  miss → `None` → the provider drops out of the document entirely.
+- Billing: `GET /v1/dashboard/billing/subscription` (`hard_limit_usd`;
+  `1e8` = new-api "unlimited" sentinel → uncapped) and `.../usage`
+  (`total_usage` = lifetime US cents for the token). **Date params are
+  ignored by agentrouter's fork** (disjoint windows return identical sums,
+  verified 2026-09-05) → the figure is lifetime-cumulative; today's spend
+  = lifetime − yesterday's history snapshot (`_gateway_spent_today`,
+  rotation/missing baseline → unknown, never negative). First day seeds
+  silently.
+- Rendering: `kind:"balance"`, `label="$37.93"`, `value=lifetime` (drives
+  tone at $70/$90), detail `"new-api · <system_name> · $X today"`. No
+  Panel.qml changes were needed. Key NEVER enters the document
+  (test-asserted, incl. literal-key and env-name paths).
+- Corpus v9: models.yml + `.omp/agent/.env` fixtures (agentrouter = gateway,
+  trollllm = non-new-api drop, qwen = static-id skip), three billing
+  fixtures, manifest `expected.newapi` golden, engine-state wipe in
+  make_corpus (stale history would drift day-relative goldens).
 
 ### Cost plane
 

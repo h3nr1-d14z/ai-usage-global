@@ -798,6 +798,163 @@ def fetch_qwen(ctx: dict) -> dict:
                   detail=f"local · {req5}/{cap5} 5h · {reqw}/{capw} wk · {reqm}/{capm} mo req")
 
 
+# --------------------------------------------------------------------------- #
+# New-API gateways (QuantumNous/new-api): OMP models.yml providers whose host
+# speaks the new-api console API. The OpenAI-compatible billing endpoints
+# report the token's lifetime spend (total_usage, US cents) and quota
+# (hard_limit_usd; new-api's "unlimited" sentinel is 1e8). Some forks
+# ignore the billing date params (agentrouter: disjoint windows return
+# identical sums, verified 2026-09-05), so the figure is treated as
+# lifetime-cumulative and today's spend is derived from the persisted
+# history snapshots instead. The gateway key resolves the way OMP resolves
+# it: an env NAME in models.yml → ~/.omp/agent/.env (the file OMP loads)
+# → the panel's own env store; a literal value is used as-is.
+# --------------------------------------------------------------------------- #
+
+def _omp_dotenv(ctx: dict) -> dict[str, str]:
+    out: dict[str, str] = {}
+    _load_dotenv(ctx["home"] / ".omp/agent/.env", out)
+    return out
+
+
+def _omp_models_providers(ctx: dict) -> dict[str, dict]:
+    """providers: section of OMP's models.yml → {name: {baseUrl, apiKey}}.
+    A subset parser for the shape OMP writes (2-space providers, 4-space
+    flat mappings); nested model lists are skipped. Fail-soft."""
+    path = ctx["home"] / ".omp/agent/models.yml"
+    try:
+        if not path.is_file() or path.stat().st_size > 262144:
+            return {}
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return {}
+    import re
+    section = current = ""
+    out: dict[str, dict] = {}
+    for raw in lines:
+        line = raw.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line[0].isspace():
+            section, current = line.split(":", 1)[0].strip(), ""
+            continue
+        if section != "providers":
+            continue
+        m = re.match(r"^  (\S[^:]*):\s*$", line)
+        if m:
+            current = m.group(1).strip()
+            out.setdefault(current, {})
+            continue
+        m = re.match(r"^    ([A-Za-z][A-Za-z0-9]*): (.+)$", line)
+        if m and current and m.group(1) in ("baseUrl", "apiKey"):
+            out[current][m.group(1)] = m.group(2).strip().strip("'\"")
+    return out
+
+
+def newapi_gateways(ctx: dict) -> list[dict]:
+    """Candidate gateway providers (disk-only; new-api-ness is confirmed by
+    fetch_newapi via /api/status, so a non-gateway host costs one request
+    and then drops out). Host-deduped, name-sorted, never colliding with
+    the static quota registry ids."""
+    import re
+    env = _omp_dotenv(ctx)
+    static = {p["id"] for p in PROVIDERS}
+    hosts: set[str] = set()
+    out: list[dict] = []
+    for name, cfg in sorted(_omp_models_providers(ctx).items()):
+        if name in static:
+            continue
+        base = (cfg.get("baseUrl") or "").strip()
+        if not base.startswith(("http://", "https://")):
+            continue
+        root = base.rstrip("/")
+        if root.endswith("/v1"):
+            root = root[:-3].rstrip("/")
+        host = root.split("://", 1)[1].split("/", 1)[0]
+        if not host or host in hosts:
+            continue
+        hosts.add(host)
+        field = (cfg.get("apiKey") or "").strip()
+        key_env, key = "", None
+        if field and re.fullmatch(r"[A-Z][A-Z0-9_]*", field):
+            key_env = field
+            key = env.get(field) or _ENV.get(field) or None
+        elif field:
+            key_env = re.sub(r"[^A-Z0-9]+", "_", name.upper()).strip("_") + "_API_KEY"
+            key = field
+        out.append({"id": name, "name": name, "display": name[:2].upper(),
+                    "keyEnv": key_env, "baseUrl": root, "apiKey": key})
+    return out
+
+
+def _gateway_spent_today(ctx: dict, gateway_id: str, lifetime_usd: float) -> float | None:
+    """Today's spend = lifetime now minus the last snapshot from a previous
+    day (normally yesterday's final refresh). No baseline, or lifetime went
+    backwards (token rotated) → None: unknown is honest, negative is not."""
+    try:
+        data = json.loads((ctx["home"] / ".local/state/h3nr1.d14z.ai-usage"
+                           "/history.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    days = data.get("days") if isinstance(data, dict) else None
+    prior = days.get(local_date(ctx["nowMs"] - 86400_000)) \
+        if isinstance(days, dict) else None
+    prev = (prior.get("spend") or {}).get(gateway_id) \
+        if isinstance(prior, dict) else None
+    n = finite(prev, -1.0)
+    if n < 0 or lifetime_usd < n:
+        return None
+    return round(lifetime_usd - n, 2)
+
+
+def fetch_newapi(ctx: dict) -> dict | None:
+    """One new-api gateway. /api/status identifies the host without auth;
+    a non-new-api answer (or an unreachable host) → None so the provider
+    drops out of the document entirely. Once identified, failures are real
+    and surface as error records. The key never enters the document."""
+    p = ctx["provider"]
+    fx = f"newapi-{p['id']}"
+    try:
+        status = fetch_fixture(fx, "status") if _FIXTURES_DIR else \
+            fetch_json(p["baseUrl"] + "/api/status")
+    except Exception:  # noqa: BLE001 — unreachable/404/HTML → not new-api
+        return None
+    data = status.get("data") if isinstance(status, dict) else None
+    if not (isinstance(data, dict) and isinstance(data.get("system_name"), str)
+            and data.get("version")):
+        return None
+    if not p.get("apiKey"):
+        return record(p, error="no-key")
+    try:
+        hdr = {"Authorization": "Bearer " + p["apiKey"]}
+        sub = fetch_fixture(fx, "subscription") if _FIXTURES_DIR else \
+            fetch_json(p["baseUrl"] + "/v1/dashboard/billing/subscription", hdr)
+        usg = fetch_fixture(fx, "usage") if _FIXTURES_DIR else \
+            fetch_json(p["baseUrl"] + "/v1/dashboard/billing/usage", hdr)
+    except Exception:  # noqa: BLE001 — identified gateway, real failure
+        return record(p, error="fetch-failed")
+    lifetime = finite(usg.get("total_usage") if isinstance(usg, dict) else None,
+                      0.0) / 100.0
+    cap = finite(sub.get("hard_limit_usd") if isinstance(sub, dict) else None, 0.0)
+    cap = cap if 0 < cap < 10_000_000 else None  # 1e8 = new-api "unlimited"
+    today = _gateway_spent_today(ctx, p["id"], lifetime)
+    parts = ["new-api · " + data["system_name"]]
+    if today is not None:
+        parts.append(f"${today:.2f} today")
+    if cap is not None:
+        parts.append(f"${lifetime:.2f} of ${cap:.0f}")
+    prov = dict(p)
+    prov["name"] = data["system_name"]
+    words = data["system_name"].split()
+    prov["display"] = ("".join(w[0] for w in words[:2]).upper() or p["display"])[:2]
+    windows = ([window("spend", "life", 0, used=lifetime, total=cap, unit="$")]
+               if cap is not None else [])
+    return record(prov, configured=True, kind="balance",
+                  label=f"${lifetime:.2f}", value=round(lifetime, 2),
+                  currency="$", windows=windows, detail=" · ".join(parts),
+                  newapi=True)
+
+
 QUOTA_ADAPTERS = {
     "opencode": fetch_opencode,
     "openrouter": fetch_openrouter,
@@ -1242,8 +1399,9 @@ def merge_local(results, days: DayIndex, now: int) -> dict:
 
 def update_history(ctx: dict, now: int, local: dict, providers: list) -> list:
     """Upsert today's snapshot into the persisted daily history and return
-    the trailing 30 days for the document. Provider-cap percents ride along
-    in the file (not surfaced yet): history not recorded now can never be
+    the trailing 30 days for the document. Provider-cap percents and
+    new-api gateway lifetime spend ride along in the file (spend feeds
+    tomorrow's today-figure): history not recorded now can never be
     reconstructed later. Path derives from env_home() so test corpora stay
     isolated. Never raises — history is a bonus, not a plane."""
     try:
@@ -1266,9 +1424,16 @@ def update_history(ctx: dict, now: int, local: dict, providers: list) -> list:
                     wins[str(w.get("id") or w.get("label"))] = w["percent"]
             if wins:
                 caps[p["id"]] = wins
-        days[today] = {"tokens": local.get("todayTokens", 0),
-                       "requests": local.get("todayRequests", 0),
-                       "caps": caps}
+        spend: dict = {}
+        for p in providers:
+            if p.get("newapi") and p.get("value") is not None:
+                spend[p["id"]] = round(finite(p["value"], 0.0), 2)
+        day = {"tokens": local.get("todayTokens", 0),
+               "requests": local.get("todayRequests", 0),
+               "caps": caps}
+        if spend:
+            day["spend"] = spend
+        days[today] = day
         days = {d: days[d] for d in sorted(days)[-60:]}
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.parent / (path.name + ".tmp")
@@ -1310,10 +1475,12 @@ def build_document(settings: dict) -> dict:
     started = time.monotonic_ns()
 
     def run_adapter(provider):
-        adapter = QUOTA_ADAPTERS.get(provider["id"])
         try:
             job = dict(ctx)
             job["provider"] = provider
+            if provider.get("baseUrl"):
+                return fetch_newapi(job)
+            adapter = QUOTA_ADAPTERS.get(provider["id"])
             return adapter(job) if adapter else record(provider, error="no-adapter")
         except Exception as exc:  # noqa: BLE001 — one failure never kills the doc
             return record(provider, error=f"internal:{type(exc).__name__}")
@@ -1339,9 +1506,12 @@ def build_document(settings: dict) -> dict:
         threads.append(t)
         t.start()
 
+    gateways: list[dict] = newapi_gateways(ctx) if quota_enabled else []
     if quota_enabled:
         for provider in PROVIDERS:
             spawn(run_adapter, (provider,), None)
+        for gateway in gateways:
+            spawn(run_adapter, (gateway,), None)
     if local_enabled:
         for scanner in LOCAL_SCANNERS:
             spawn(scan_local_slot, (scanner, ctx, days), scanner.__name__)
@@ -1350,6 +1520,10 @@ def build_document(settings: dict) -> dict:
     results = iter([box[1] for box in slots])
     if quota_enabled:
         providers = [next(results) for _ in PROVIDERS]
+        # Non-new-api hosts returned None and drop out; the rest append in
+        # the deterministic (name-sorted) spawn order.
+        providers += [r for r in (next(results) for _ in gateways)
+                      if r is not None]
     if local_enabled:
         local = merge_local([next(results) for _ in LOCAL_SCANNERS], days, now)
         local["history"] = update_history(ctx, now, local, providers)
