@@ -48,10 +48,19 @@ Panel {
   readonly property string barDisplay: String(root.setting("barDisplay", "Data"))
   readonly property bool barShowsData: barDisplay.toLowerCase() === "data"
   readonly property string defaultProviderId: String(root.setting("defaultProvider", "opencode"))
-  // Everything actionable is shown: configured providers plus any with a
-  // paste affordance, so keys can be added while others already report.
+  // Paste rows for unconfigured providers sit behind the "+ add provider"
+  // affordance, so the panel leads with usage, not credential forms.
+  // Auto-expanded only while nothing is configured; the first user toggle
+  // takes over the property for good.
+  property bool showAddRows: root.configuredProviders.length === 0
+  readonly property bool hasAddRows: {
+    var list = root.providers || []
+    for (var i = 0; i < list.length; i++)
+      if (list[i] && !list[i].configured && (list[i].keyEnv || "") !== "") return true
+    return false
+  }
   readonly property var shownProviders: (root.providers || []).filter(function (p) {
-    return p && (p.configured || (p.keyEnv || "") !== "")
+    return p && (p.configured || (root.showAddRows && (p.keyEnv || "") !== ""))
   })
   readonly property var configuredProviders: (root.providers || []).filter(function (p) { return p && p.configured })
   readonly property var selected: shownProviders.length > 0
@@ -306,6 +315,7 @@ Panel {
       }
       onTextKey: function (t) {
         if (t === "r" || t === "R") root.refresh()
+        else if (t === "a" || t === "A") root.showAddRows = !root.showAddRows
         else if (t === "1") root.viewTab = 0
         else if (t === "2") root.viewTab = 1
       }
@@ -394,14 +404,27 @@ Panel {
             delegate: ProviderBlock {}
           }
 
-          Text {
-            visible: root.shownProviders.length === 0
-            text: "No providers configured yet — paste an API key in any row below."
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            wrapMode: Text.WordWrap
+          // Paste rows for unconfigured providers sit behind this toggle so
+          // the panel leads with usage, not credential forms.
+          Rectangle {
+            visible: root.hasAddRows
             width: parent.width
+            height: addRowLabel.implicitHeight + Style.space(10)
+            radius: Style.cornerRadius
+            color: root.alpha(root.foreground, 0.04)
+            Text {
+              id: addRowLabel
+              anchors.centerIn: parent
+              text: root.showAddRows ? "− hide" : "+ add provider"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.showAddRows = !root.showAddRows
+            }
           }
         }
 
@@ -559,7 +582,7 @@ Panel {
         // Footer ------------------------------------------------------------- //
         Text {
           width: parent.width - Style.space(24)
-          text: "R refresh · Tab provider · 1/2 tabs"
+          text: "R refresh · Tab provider · A add · 1/2 tabs"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
