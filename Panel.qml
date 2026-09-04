@@ -66,15 +66,6 @@ Panel {
   readonly property var selected: shownProviders.length > 0
     ? shownProviders[Math.min(selectedProvider, shownProviders.length - 1)] : null
 
-  readonly property bool alarming: {
-    var list = root.configuredProviders
-    for (var i = 0; i < list.length; i++) {
-      var wins = list[i].windows || []
-      for (var j = 0; j < wins.length; j++)
-        if (wins[j].percent !== null && wins[j].percent >= 90) return true
-    }
-    return false
-  }
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
   function providerById(id) {
@@ -89,16 +80,30 @@ Panel {
     return c.length > 0 ? c[0] : null
   }
 
-  // Compact one-liner for the bar chip in Data mode: headline + nearest reset.
+  // Compact bar chip: provider code + its hottest window + %. Color carries
+  // the tone (dataButton.activeColor); hover shows the full detail line.
   function compactChip(p) {
     if (!p) return "AI —"
     if (p.kind === "balance" && p.label) return (p.display || p.name) + " " + p.label
     var wins = (p.windows || []).filter(function (w) { return w && w.percent !== null })
     if (wins.length === 0) return (p.display || "") + " —"
+    var hot = wins[0]
+    for (var i = 1; i < wins.length; i++)
+      if ((wins[i].percent || 0) > (hot.percent || 0)) hot = wins[i]
+    return (p.display || "") + " " + hot.label + " " + Math.round(hot.percent) + "%"
+  }
+
+  // Hover detail for the chip: every window with its reset countdown.
+  function chipDetail(p) {
+    if (!p) return "AI Usage Global — no data yet"
+    var wins = (p.windows || []).filter(function (w) { return w && w.percent !== null })
     var parts = []
-    for (var i = 0; i < wins.length; i++)
-      parts.push(wins[i].label + " " + Math.round(wins[i].percent) + "%")
-    return (p.display || "") + " " + parts.join(" · ")
+    for (var i = 0; i < wins.length; i++) {
+      var r = root.resetRemainingMs(wins[i].resetsAt)
+      parts.push(wins[i].label + " " + Math.round(wins[i].percent) + "%"
+                 + (r > 0 ? " · " + root.formatReset(r) : ""))
+    }
+    return (p.name || "") + (parts.length ? " — " + parts.join(" · ") : "")
   }
 
   // Console cookie missing/stale: fetch_qwen fell back to the local census.
@@ -266,21 +271,30 @@ Panel {
     visible: !root.barShowsData
     bar: root.bar
     text: "AI"
-    tooltipText: root.compactChip(root.defaultRecord())
+    tooltipText: root.chipDetail(root.defaultRecord())
     onPressed: function (buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
       else root.refresh()
     }
   }
 
-  // Data-mode bar chip: a compact text line for the default provider.
+  // Data-mode bar chip: short text, tone-colored, detail on hover.
   WidgetButton {
     id: dataButton
     anchors.fill: parent
     visible: root.barShowsData
     bar: root.bar
     text: root.compactChip(root.defaultRecord())
-    tooltipText: "AI Usage Global — click for the panel"
+    tooltipText: root.chipDetail(root.defaultRecord())
+    active: true
+    activeColor: {
+      var p = root.defaultRecord()
+      if (!p || p.kind !== "percent") return dataButton.foreground
+      var v = Number(p.value)
+      if (v >= 90) return root.urgent
+      if (v >= 70) return root.accent
+      return dataButton.foreground
+    }
     onPressed: function (buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
       else root.refresh()
