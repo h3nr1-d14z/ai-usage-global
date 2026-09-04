@@ -296,12 +296,6 @@ def percent_headline(windows: list[dict]) -> float | None:
     return max(live, default=None)
 
 
-def windows_detail(windows: list[dict]) -> str:
-    return " · ".join(
-        f"{w['label']} {w['percent'] if w['percent'] is not None else '—'}%"
-        for w in windows)
-
-
 # --------------------------------------------------------------------------- #
 # QUOTA adapters (endpoint shapes source-verified 2026-09)
 # --------------------------------------------------------------------------- #
@@ -339,7 +333,7 @@ def fetch_opencode(ctx: dict) -> dict:
     headline = percent_headline(windows)
     return record(p, configured=True, kind="percent",
                   label=f"{round(headline)}%" if headline is not None else "—",
-                  value=headline, detail=windows_detail(windows), windows=windows)
+                  value=headline, windows=windows)
 
 
 def fetch_openrouter(ctx: dict) -> dict:
@@ -470,7 +464,7 @@ def fetch_zai(ctx: dict) -> dict:
     headline = percent_headline(windows)
     return record(p, configured=True, kind="percent",
                   label=f"{round(headline)}%" if headline is not None else "—",
-                  value=headline, windows=windows, detail=windows_detail(windows))
+                  value=headline, windows=windows)
 
 
 def fetch_deepseek(ctx: dict) -> dict:
@@ -542,7 +536,7 @@ def fetch_copilot(ctx: dict) -> dict:
     return record(p, configured=True, kind="percent",
                   label=f"{round(headline)}%" if headline is not None else (plan[:6] or "—"),
                   value=headline, windows=windows,
-                  detail=plan or windows_detail(windows))
+                  detail=plan)
 
 
 QWEN_USAGE_API = "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage"
@@ -741,12 +735,9 @@ def fetch_qwen(ctx: dict) -> dict:
             wins = None
         if wins:
             headline = percent_headline(wins)
-            detail = "console · " + " · ".join(
-                f"{w['label']} {w['percent'] if w['percent'] is not None else '—'}%"
-                for w in wins)
             return record(p, configured=True, kind="percent",
                           label=f"{round(headline)}%" if headline is not None else "—",
-                          value=headline, windows=wins, detail=detail)
+                          value=headline, windows=wins, detail="console")
     root = ctx["home"] / ".qwen/projects"
     if not root.is_dir():
         return record(p, error="no-local-store")

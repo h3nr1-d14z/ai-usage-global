@@ -387,7 +387,7 @@ Panel {
         Column {
           visible: root.viewTab === 0
           width: parent.width - Style.space(24)
-          spacing: Style.space(10)
+          spacing: Style.space(14)
 
           Repeater {
             model: root.shownProviders
@@ -557,24 +557,12 @@ Panel {
         }
 
         // Footer ------------------------------------------------------------- //
-        Row {
+        Text {
           width: parent.width - Style.space(24)
-          spacing: Style.space(8)
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: {
-              var wins = (root.selected && root.selected.windows) || []
-              var soonest = -1
-              for (var i = 0; i < wins.length; i++) {
-                var r = root.resetRemainingMs(wins[i].resetsAt)
-                if (r > 0 && (soonest < 0 || r < soonest)) soonest = r
-              }
-              return soonest > 0 ? "next reset " + root.formatReset(soonest) : "R refresh · Tab switch"
-            }
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
+          text: "R refresh · Tab provider · 1/2 tabs"
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
         }
       }
     }
@@ -613,7 +601,7 @@ Panel {
       spacing: Style.space(8)
       Text {
         width: parent.width * 0.6
-        text: (p.display || "") + "  " + (p.name || "")
+        text: p.name || ""
         elide: Text.ElideRight
         color: block.hot ? root.foreground : root.dim
         font.family: root.fontFamily
@@ -626,12 +614,24 @@ Panel {
           if (!p.configured) return "no key"
           if (p.kind === "balance" && p.value !== null && p.value !== undefined)
             return p.label
-          return p.label || "—"
+          // Metered providers: each window's % is already on its meter row,
+          // so this slot aggregates instead — the soonest reset.
+          var wins = p.windows || []
+          if (wins.length > 1) {
+            var soonest = -1
+            for (var i = 0; i < wins.length; i++) {
+              var r = root.resetRemainingMs(wins[i].resetsAt)
+              if (r > 0 && (soonest < 0 || r < soonest)) soonest = r
+            }
+            if (soonest > 0) return "⟲ " + root.formatReset(soonest)
+          }
+          return wins.length > 0 ? "" : (p.label || "—")
         }
-        color: p.configured ? root.tone((p.value !== null && p.value !== undefined ? Number(p.value) : 0) / 100) : root.dim
+        color: (p.configured && p.kind === "balance")
+                 ? root.tone((Number(p.value) || 0) / 100) : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
-        font.bold: true
+        font.bold: p.configured && p.kind === "balance"
       }
     }
 
@@ -715,7 +715,7 @@ Panel {
           Text {
             visible: keyInput.text === ""
             anchors.left: parent.left
-            text: "paste " + (block.p.keyEnv || "")
+            text: block.p.keyEnv || ""
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

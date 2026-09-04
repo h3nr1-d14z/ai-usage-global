@@ -212,8 +212,8 @@ def main() -> int:
         rec = qwen_of(run_engine(make_home(tmp / "h-weekonly",
                                            rows=["f=6; login_aliyunid_csrf=F7"]),
                                  wo_fix))
-        check("week-only: fraction 0.417 → console · W 41.7%",
-              rec["detail"] == "console · W 41.7%" and rec["label"] == "42%",
+        check("week-only: fraction 0.417 → console source tag",
+              rec["detail"] == "console" and rec["label"] == "42%",
               f"{rec['detail']} / {rec['label']}")
 
         # 5) console failure → census fallback, exact counts ----------------- #
