@@ -801,14 +801,19 @@ def fetch_qwen(ctx: dict) -> dict:
 # --------------------------------------------------------------------------- #
 # New-API gateways (QuantumNous/new-api): OMP models.yml providers whose host
 # speaks the new-api console API. The OpenAI-compatible billing endpoints
-# report the token's lifetime spend (total_usage, US cents) and quota
-# (hard_limit_usd; new-api's "unlimited" sentinel is 1e8). Some forks
+# report lifetime spend (total_usage, US cents) and quota (hard_limit_usd =
+# remaining + used = TOTAL per controller/billing.go; new-api's
+# "unlimited" sentinel is 1e8). With DisplayTokenStatEnabled off — the
+# agentrouter case, verified live — both figures are USER-level (account
+# spend), not per-token; token-stat sites scope them to the calling token.
+# Sites can also render CNY or raw-token display types (QuotaDisplayType):
+# the "$" here assumes the USD default agentrouter uses. Some forks
 # ignore the billing date params (agentrouter: disjoint windows return
-# identical sums, verified 2026-09-05), so the figure is treated as
-# lifetime-cumulative and today's spend is derived from the persisted
-# history snapshots instead. The gateway key resolves the way OMP resolves
-# it: an env NAME in models.yml → ~/.omp/agent/.env (the file OMP loads)
-# → the panel's own env store; a literal value is used as-is.
+# identical sums), so the figure is treated as lifetime-cumulative and
+# today's spend is derived from the persisted history snapshots instead.
+# The gateway key resolves the way OMP resolves it: an env NAME in
+# models.yml → ~/.omp/agent/.env (the file OMP loads) → the panel's own
+# env store; a literal value is used as-is.
 # --------------------------------------------------------------------------- #
 
 def _omp_dotenv(ctx: dict) -> dict[str, str]:
@@ -890,7 +895,8 @@ def newapi_gateways(ctx: dict) -> list[dict]:
 def _gateway_spent_today(ctx: dict, gateway_id: str, lifetime_usd: float) -> float | None:
     """Today's spend = lifetime now minus the last snapshot from a previous
     day (normally yesterday's final refresh). No baseline, or lifetime went
-    backwards (token rotated) → None: unknown is honest, negative is not."""
+    backwards (counter reset or rotated) → None: unknown is honest, negative
+    is not."""
     try:
         data = json.loads((ctx["home"] / ".local/state/h3nr1.d14z.ai-usage"
                            "/history.json").read_text(encoding="utf-8"))

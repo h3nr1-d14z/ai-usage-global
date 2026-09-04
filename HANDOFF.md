@@ -63,9 +63,11 @@ plans, plus a local-cost plane. Two layers, deliberately separated:
   and skips static-registry ids. `fetch_newapi()` then confirms new-api-ness
   via `GET /api/status` (needs `data.system_name` + `data.version`); any
   miss → `None` → the provider drops out of the document entirely.
-- Billing: `GET /v1/dashboard/billing/subscription` (`hard_limit_usd`;
-  `1e8` = new-api "unlimited" sentinel → uncapped) and `.../usage`
-  (`total_usage` = lifetime US cents for the token). **Date params are
+- Billing: `GET /v1/dashboard/billing/subscription` (`hard_limit_usd` =
+  remaining + used = TOTAL per controller/billing.go; `1e8` = new-api
+  "unlimited" sentinel → uncapped) and `.../usage`
+  (`total_usage` = lifetime US cents; user-level on agentrouter —
+  token-scoped only on sites that enable token stats). **Date params are
   ignored by agentrouter's fork** (disjoint windows return identical sums,
   verified 2026-09-05) → the figure is lifetime-cumulative; today's spend
   = lifetime − yesterday's history snapshot (`_gateway_spent_today`,

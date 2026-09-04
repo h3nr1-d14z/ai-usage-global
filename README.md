@@ -96,11 +96,13 @@ Any OMP provider whose host speaks the [QuantumNous/new-api](https://github.com/
 picked up automatically: `~/.omp/agent/models.yml` provides the `baseUrl`
 and the key (an env-name entry resolves against `~/.omp/agent/.env`, the
 file OMP itself loads — a literal `apiKey:` works too). The widget calls the
-gateway's OpenAI-compatible billing endpoints and shows the token's
-**lifetime spend** (`total_usage`, US cents) plus a per-day figure derived
-from the persisted history snapshots — the first day seeds silently, the
-"$ today" line appears from day two. Quota-capped tokens additionally get
-a spend meter; new-api's "unlimited" sentinel (`1e8`) renders as uncapped.
+gateway's OpenAI-compatible billing endpoints and shows the account's
+**lifetime spend** (`total_usage`, US cents; user-level on Agent Router —
+token-scoped only on sites that enable token stats) plus a per-day figure
+derived from the persisted history snapshots — the first day seeds
+silently, the "$ today" line appears from day two. Quota-capped gateways
+additionally get a spend meter (against `hard_limit_usd` = remaining +
+used = total); new-api's "unlimited" sentinel (`1e8`) renders as uncapped.
 Some forks ignore the billing date params (Agent Router does), which is why
 the engine treats the figure as lifetime-cumulative. Hosts that fail the
 `/api/status` signature check (or aren't new-api at all) drop out silently.
