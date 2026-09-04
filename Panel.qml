@@ -400,7 +400,7 @@ Panel {
               width: tabLabel.implicitWidth + Style.space(16)
               height: tabLabel.implicitHeight + Style.space(8)
               radius: height / 2
-              color: active ? root.alpha(root.accent, 0.22)
+              color: active ? root.alpha(root.accent, 0.32)
                             : (tabMouse.containsMouse ? root.alpha(root.foreground, 0.12)
                                                       : root.alpha(root.foreground, 0.06))
               border.color: active ? root.accent : "transparent"
@@ -509,36 +509,58 @@ Panel {
             }
           }
 
-          // 7-day sparkline
-          Rectangle {
+          // 7-day sparkline with weekday labels (last bar = today, accent)
+          Column {
             width: parent.width
-            height: Style.space(56)
-            radius: Style.cornerRadius
-            color: root.alpha(root.foreground, 0.04)
-            Canvas {
-              id: spark
-              anchors.fill: parent
-              anchors.margins: Style.space(6)
-              property var series: root.local.recentDays || []
-              onSeriesChanged: requestPaint()
-              onPaint: {
-                var ctx = getContext("2d")
-                ctx.clearRect(0, 0, width, height)
-                var s = series
-                if (!s || s.length === 0) return
-                var maxTok = 1
-                for (var i = 0; i < s.length; i++) maxTok = Math.max(maxTok, s[i].tokens || 0)
-                var step = width / s.length
-                var bw = step * 0.62
-                for (var k = 0; k < s.length; k++) {
-                  var frac = (s[k].tokens || 0) / maxTok
-                  var bh = Math.max(2, frac * (height))
-                  ctx.fillStyle = Qt.alpha(k === s.length - 1 ? accent : foreground, k === s.length - 1 ? 0.95 : 0.55)
-                  ctx.fillRect(k * step + (step - bw) / 2, height - bh, bw, bh)
+            spacing: 2
+            Rectangle {
+              width: parent.width
+              height: Style.space(56)
+              radius: Style.cornerRadius
+              color: root.alpha(root.foreground, 0.04)
+              Canvas {
+                id: spark
+                anchors.fill: parent
+                anchors.margins: Style.space(6)
+                property var series: root.local.recentDays || []
+                onSeriesChanged: requestPaint()
+                onPaint: {
+                  var ctx = getContext("2d")
+                  ctx.clearRect(0, 0, width, height)
+                  var s = series
+                  if (!s || s.length === 0) return
+                  var maxTok = 1
+                  for (var i = 0; i < s.length; i++) maxTok = Math.max(maxTok, s[i].tokens || 0)
+                  var step = width / s.length
+                  var bw = step * 0.62
+                  for (var k = 0; k < s.length; k++) {
+                    var frac = (s[k].tokens || 0) / maxTok
+                    var bh = Math.max(2, frac * (height))
+                    ctx.fillStyle = Qt.alpha(k === s.length - 1 ? accent : foreground,
+                                             k === s.length - 1 ? 0.95 : 0.55)
+                    ctx.fillRect(k * step + (step - bw) / 2, height - bh, bw, bh)
+                  }
+                }
+                readonly property color accent: root.accent
+                readonly property color foreground: root.foreground
+              }
+            }
+            Row {
+              width: parent.width
+              Repeater {
+                id: dayLabels
+                model: root.recentDayLabels()
+                delegate: Text {
+                  required property int index
+                  required property var modelData
+                  width: parent.width / Math.max(1, dayLabels.count)
+                  horizontalAlignment: Text.AlignHCenter
+                  text: modelData
+                  color: index === dayLabels.count - 1 ? root.accent : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
                 }
               }
-              readonly property color accent: root.accent
-              readonly property color foreground: root.foreground
             }
           }
 
@@ -558,10 +580,11 @@ Panel {
               delegate: Row {
                 width: parent.width
                 spacing: Style.space(8)
+                required property int index
                 required property var modelData
                 property var row: modelData
                 Text {
-                  width: parent.width * 0.42
+                  width: parent.width * 0.46
                   text: row.name
                   elide: Text.ElideMiddle
                   color: root.foreground
@@ -569,7 +592,7 @@ Panel {
                   font.pixelSize: Style.font.caption
                 }
                 Rectangle {
-                  width: parent.width * 0.36
+                  width: parent.width * 0.30
                   height: Style.space(8)
                   anchors.verticalCenter: parent.verticalCenter
                   radius: height / 2
@@ -578,7 +601,7 @@ Panel {
                     width: parent.width * row.share
                     height: parent.height
                     radius: parent.radius
-                    color: root.tone(row.share)
+                    color: index === 0 ? root.accent : root.alpha(root.foreground, 0.45)
                   }
                 }
                 Text {
@@ -635,6 +658,7 @@ Panel {
       var b = m[name]
       var tok = (b.inputTokens || 0) + (b.outputTokens || 0) + (b.cacheReadTokens || 0)
               + (b.cacheWriteTokens || 0) + (b.reasoningTokens || 0)
+      if (tok <= 0) continue
       rows.push({ name: name, tokens: tok })
       maxTok = Math.max(maxTok, tok)
     }
@@ -642,6 +666,17 @@ Panel {
     var top = rows.slice(0, 8)
     for (var i = 0; i < top.length; i++) top[i].share = top[i].tokens / maxTok
     return top
+  }
+
+  // Weekday initials under the sparkline: last entry is today.
+  function recentDayLabels() {
+    var n = (root.local && root.local.recentDays || []).length
+    var out = []
+    for (var i = 0; i < n; i++) {
+      var d = new Date(root.nowMs - (n - 1 - i) * 86400000)
+      out.push(["S", "M", "T", "W", "T", "F", "S"][d.getDay()])
+    }
+    return out
   }
 
   // One provider: name, headline, meter bars per window with reset countdown.
