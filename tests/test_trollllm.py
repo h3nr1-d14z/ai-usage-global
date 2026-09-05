@@ -47,9 +47,9 @@ def me_body(alloc=50, used=5.25, reset_ms=None, tier="lite") -> dict:
             "dailyResetHour": 23, "dailyResetMinute": 0}
 
 
-def res_body(remaining=12.5, spent=3.61) -> dict:
+def res_body(remaining=12.5, spent=3.61, active=1) -> dict:
     return {"totalRemaining": remaining, "totalOriginal": remaining + spent,
-            "totalUsed": spent, "activeCount": 1, "resources": []}
+            "totalUsed": spent, "activeCount": active, "resources": []}
 
 
 def make_fixtures(d: Path, me: object, res: object) -> None:
@@ -84,6 +84,7 @@ def run_engine(home: Path, fixtures: Path, env_extra: dict | None = None) -> dic
                 "AIUSAGE_FIXTURES": str(fixtures), "TZ": "UTC",
                 "PYTHONDONTWRITEBYTECODE": "1"})
     env.pop("AIUSAGE_ENV_FILE", None)
+    env.pop("TROLLLLM_COOKIE", None)
     for k, v in (env_extra or {}).items():
         env[k] = v
     proc = subprocess.run([sys.executable, str(ENGINE), "--settings",
@@ -96,7 +97,6 @@ def run_engine(home: Path, fixtures: Path, env_extra: dict | None = None) -> dic
 
 def tl_of(doc: dict) -> dict:
     return next(p for p in doc["providers"] if p["id"] == "trollllm")
-
 
 def wins_of(rec: dict) -> dict:
     return {x["id"]: x for x in rec["windows"]}
@@ -187,6 +187,19 @@ def main() -> int:
                                {"TROLLLLM_COOKIE": cookie}))
         check("no ledgers at all: fetch-failed", rec["error"] == "fetch-failed",
               str(rec["error"]))
+
+        # 6b) all-expired wallet: no false 100% meter, detail keeps the
+        #     ledger visible (the live account state 2026-09-05) --------- #
+        gone = tmp / "fx-gone"
+        make_fixtures(gone, me_body(), res_body(remaining=0, spent=3.61,
+                                                active=0))
+        rec = tl_of(run_engine(make_home(tmp / "h6b"), gone,
+                               {"TROLLLLM_COOKIE": cookie}))
+        check("expired wallet: plan-only windows",
+              set(wins_of(rec)) == {"plan"}, str(wins_of(rec)))
+        check("expired wallet: detail still shows the ledger",
+              rec["detail"] == "lite · daily 5.25/50 cr · wallet 0.00 cr",
+              rec["detail"])
 
         # 7) bad shape (me is a list) → fetch-failed --------------------------- #
         bad = tmp / "fx-bad"

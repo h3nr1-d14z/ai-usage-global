@@ -119,7 +119,7 @@ def run_engine(home: Path, fixtures: Path, env_extra: dict | None = None,
     # user's real gateway keys — pop them so the no-key cases stay honest.
     for k in ("AIUSAGE_ENV_FILE", "AGENTROUTER_API_KEY", "TROLLLLM_API_KEY",
               "AGENTROUTER_ACCESS_TOKEN", "AGENTROUTER_USER_ID",
-              "QWEN_PLAN_COOKIE"):
+              "QWEN_PLAN_COOKIE", "TROLLLLM_COOKIE"):
         env.pop(k, None)
     for k, v in (env_extra or {}).items():
         env[k] = v

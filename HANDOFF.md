@@ -29,6 +29,7 @@ plans, plus a local-cost plane. Two layers, deliberately separated:
 | OpenRouter / Kimi / ZAI / DeepSeek / Alibaba | vendor quota APIs | `*_API_KEY` env |
 | Qwen Coding Plan | **console gateway** (real %) → **transcript census** fallback | cookie (see below) |
 | Cursor | local state.vscdb | auto-detected |
+| New-API gateways (Agent Router) | **billing endpoints** (lifetime $, US-cents `total_usage`) | models.yml env-name → `~/.omp/agent/.env` |
 | TrollLLM | **dashboard API** (dual ledger: plan daily credits + PAYG wallet) | session cookie (see below) |
 
 ### Qwen — the long saga, resolved
@@ -64,22 +65,31 @@ plans, plus a local-cost plane. Two layers, deliberately separated:
   (`/api/user/me`, `/api/user/credit-resources`), cookie never enters the
   document (test-asserted). Expired → `fetch-failed` (re-paste); missing →
   benign `no-cookie` + paste row.
-- **Units**: 1 credit = $0.01 USD (site's usage doc); figures stay in
-  credits — the unit the dashboard renders. **Ledgers**: plan
-  `planDailyUsed`/`planDailyAllocation` (tiers lite 50 / standard 100 /
-  plus 160 / premium 250 / … / elite 1800 cr per day; resets daily —
-  `planDailyResetDate` can lag into the past, engine rolls +24h to the
-  next occurrence) and PAYG wallet `totalUsed`/(`totalRemaining`+
-  `totalUsed`) — the depletion gauge the dashboard shows (purchased
-  credits never expire; promo resources do, per-batch `expiresAt`).
-  `creditPriority: plan_first` means plan credits burn first.
+- **Units**: 1 credit = $0.01 USD (site's usage doc; confirmed by tier
+  economics — lite 339k₫ ≈ $13.6 for 1500 cr/mo ≈ $15 of usage, a normal
+  reseller margin; at $1/cr it would be $1500 for $13.6, impossible. The
+  /pricing "1.000đ = $1 credit" line is impossible under BOTH readings —
+  marketing sloppiness, same as the stale "$20/day" tier strings. An OMP
+  cost cross-check was inconclusive: the 5.25 cr burned outside OMP's
+  records). Figures stay in credits — the unit the dashboard renders.
+  **Ledgers**: plan `planDailyUsed`/`planDailyAllocation` (tiers lite 50 /
+  standard 100 / plus 160 / premium 250 / … / elite 1800 cr per day;
+  resets daily — `planDailyResetDate` lags into the past (it is the
+  current window's start), engine rolls +24h to the next occurrence) and
+  PAYG wallet `totalUsed`/(`totalRemaining`+`totalUsed`) — the depletion
+  gauge the dashboard shows (purchased credits never expire; promo
+  resources do, per-batch `expiresAt`). `creditPriority: plan_first`
+  means plan credits burn first.
 - Rendering: `kind:"balance"`, `label` = plan credits remaining
   (`"44.8 cr"`), `value` = plan used % (so the 70/90 bar-chip tone means
   plan pressure), windows `plan` (daily meter + reset countdown) and
-  `payg` (wallet meter), detail `"lite · daily 5.25/50 cr · wallet
-  12.50 cr"`. Pure-PAYG accounts (no plan) headline the wallet instead.
-  Static registry entry (never a new-api gateway); OMP's
-  `trollllm-anthropic` twin still drops as a non-new-api host.
+  `payg` (wallet meter — only while a batch is live: `totalRemaining > 0`
+  or `activeCount > 0`; an all-expired wallet hides the meter so it can't
+  render a false red 100% or trip cap alerts, detail keeps `wallet X cr`),
+  detail `"lite · daily 5.25/50 cr · wallet 12.50 cr"`. Pure-PAYG
+  accounts (no plan) headline the wallet instead. Static registry entry
+  (never a new-api gateway); OMP's `trollllm-anthropic` twin still drops
+  as a non-new-api host.
 
 ### New-API gateways — how it works
 

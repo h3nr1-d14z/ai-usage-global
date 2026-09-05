@@ -1074,11 +1074,15 @@ def fetch_trollllm(ctx: dict) -> dict:
     reset = parse_ts_ms(me.get("planDailyResetDate"))
     while reset is not None and reset <= ctx["nowMs"]:
         reset += 24 * 3600_000
+    active = finite(res.get("activeCount"), 0.0)
     windows = []
     if alloc > 0:
         windows.append(window("plan", "daily", 24 * 3600_000, used=used,
                               total=alloc, unit="cr", resets_at_ms=reset))
-    if wallet + spent > 0:  # wallet depletion, the gauge the site shows
+    # Wallet depletion gauge, but only while a batch is actually live —
+    # an all-expired wallet (activeCount 0, nothing remaining) must not
+    # render as a red "100% used" meter: those credits expired unspent.
+    if (wallet > 0 or active > 0) and wallet + spent > 0:
         windows.append(window("payg", "wallet", 0, used=spent,
                               total=wallet + spent, unit="cr"))
     if not windows:
