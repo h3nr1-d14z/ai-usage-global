@@ -40,7 +40,8 @@ from pathlib import Path
 # os.environ/tzset games — nothing can be silently overridden by the shell.
 UTC = dt.timezone.utc
 
-CORPUS_VERSION = 9  # v9: new-api gateway (models.yml + .env + billing fixtures)
+CORPUS_VERSION = 11  # v11: golden label/value/currency/windows restored
+
 # Fixed anchor: 2026-09-03T12:00:00Z. Pinned so window math is reproducible.
 FIXED_NOW_MS = int(dt.datetime(2026, 9, 3, 12, 0, 0, tzinfo=dt.timezone.utc)
                    .timestamp() * 1000)
@@ -635,9 +636,10 @@ def main() -> int:
                 "id": "agentrouter", "name": "Fixture Router",
                 "display": "FR", "configured": True, "kind": "balance",
                 "label": "$37.93", "value": 37.93, "currency": "$",
-                "detail": "new-api · Fixture Router", "windows": [],
+                "detail": "new-api · Fixture Router · token only",
+                "windows": [],
                 "error": None, "keyEnv": "AGENTROUTER_API_KEY",
-                "newapi": True,
+                "spendScope": "token", "newapi": True,
             },
         },
     }

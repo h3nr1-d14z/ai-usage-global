@@ -277,7 +277,8 @@ def main() -> int:
         spent = state["days"][today].get("spend")
     except (OSError, ValueError, KeyError, TypeError):
         spent = None
-    check("newapi spend snapshot persisted", spent == {"agentrouter": 37.93},
+    check("newapi spend snapshot persisted (scope-tagged)",
+          spent == {"agentrouter": {"usd": 37.93, "scope": "token"}},
           str(spent))
 
     # ---- hygiene -------------------------------------------------------------- #

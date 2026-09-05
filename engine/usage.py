@@ -892,11 +892,13 @@ def newapi_gateways(ctx: dict) -> list[dict]:
     return out
 
 
-def _gateway_spent_today(ctx: dict, gateway_id: str, lifetime_usd: float) -> float | None:
-    """Today's spend = lifetime now minus the last snapshot from a previous
-    day (normally yesterday's final refresh). No baseline, or lifetime went
-    backwards (counter reset or rotated) → None: unknown is honest, negative
-    is not."""
+def _gateway_spent_today(ctx: dict, gateway_id: str, current_usd: float,
+                         scope: str) -> float | None:
+    """Today's spend = the tracked figure now minus the last snapshot from a
+    previous day (normally yesterday's final refresh). Snapshots are scope-
+    tagged ({usd, scope}); a bare number is the legacy token-scope format.
+    No baseline, scope change, or counter going backwards (reset/rotation)
+    → None: unknown is honest, negative is not."""
     try:
         data = json.loads((ctx["home"] / ".local/state/h3nr1.d14z.ai-usage"
                            "/history.json").read_text(encoding="utf-8"))
@@ -905,19 +907,47 @@ def _gateway_spent_today(ctx: dict, gateway_id: str, lifetime_usd: float) -> flo
     days = data.get("days") if isinstance(data, dict) else None
     prior = days.get(local_date(ctx["nowMs"] - 86400_000)) \
         if isinstance(days, dict) else None
-    prev = (prior.get("spend") or {}).get(gateway_id) \
+    snap = (prior.get("spend") or {}).get(gateway_id) \
         if isinstance(prior, dict) else None
-    n = finite(prev, -1.0)
-    if n < 0 or lifetime_usd < n:
+    if isinstance(snap, dict):
+        prev, prev_scope = finite(snap.get("usd"), -1.0), snap.get("scope")
+    else:
+        prev, prev_scope = finite(snap, -1.0), "token"
+    if prev < 0 or prev_scope != scope or current_usd < prev:
         return None
-    return round(lifetime_usd - n, 2)
+    return round(current_usd - prev, 2)
+
+
+def _newapi_user_credential(ctx: dict, p: dict) -> tuple[str, str] | None:
+    """(access_token, user_id) for user-level billing, or None. Some forks
+    (agentrouter) require the New-Api-User header on /api/user/* — the PAT
+    alone 401s. Names derive from the gateway id: AGENTROUTER_ACCESS_TOKEN /
+    AGENTROUTER_USER_ID, resolved against OMP's .env then the panel env."""
+    import re
+    stem = re.sub(r"[^A-Z0-9]+", "_", p["id"].upper()).strip("_")
+    if not stem:
+        return None
+    env = _omp_dotenv(ctx)
+    pat = env.get(stem + "_ACCESS_TOKEN") or _ENV.get(stem + "_ACCESS_TOKEN") or ""
+    uid = env.get(stem + "_USER_ID") or _ENV.get(stem + "_USER_ID") or ""
+    pat, uid = pat.strip(), uid.strip()
+    return (pat, uid) if pat and uid else None
 
 
 def fetch_newapi(ctx: dict) -> dict | None:
     """One new-api gateway. /api/status identifies the host without auth;
     a non-new-api answer (or an unreachable host) → None so the provider
     drops out of the document entirely. Once identified, failures are real
-    and surface as error records. The key never enters the document."""
+    and surface as error records. No credential ever enters the document.
+
+    Two data levels: the sk- billing endpoints are token-scoped on sites
+    that enable token stats (subscription hard_limit_usd = 1e8 is the
+    unlimited-TOKEN sentinel — the account's real quota is invisible
+    there). With {ID}_ACCESS_TOKEN + {ID}_USER_ID the user-level record
+    (what the web dashboard shows: balance + account consumption) comes
+    from /api/user/self; quota figures are raw units, QuotaPerUnit 500000
+    (compiled constant, source-verified). Any user-level failure falls
+    back to the token-level spend."""
     p = ctx["provider"]
     fx = f"newapi-{p['id']}"
     try:
@@ -931,6 +961,44 @@ def fetch_newapi(ctx: dict) -> dict | None:
         return None
     if not p.get("apiKey"):
         return record(p, error="no-key")
+
+    prov = dict(p)
+    prov["name"] = data["system_name"]
+    words = data["system_name"].split()
+    prov["display"] = ("".join(w[0] for w in words[:2]).upper() or p["display"])[:2]
+
+    def today_part(current: float, scope: str) -> str:
+        spent = _gateway_spent_today(ctx, p["id"], current, scope)
+        return f" · ${spent:.2f} today" if spent is not None else ""
+
+    # ---- user level (dashboard numbers) ---------------------------------- #
+    cred = _newapi_user_credential(ctx, p)
+    if cred is not None:
+        try:
+            hdr = {"Authorization": "Bearer " + cred[0],
+                   "New-Api-User": cred[1],
+                   "Referer": p["baseUrl"] + "/console"}
+            me = fetch_fixture(fx, "user") if _FIXTURES_DIR else \
+                fetch_json(p["baseUrl"] + "/api/user/self", hdr)
+            ud = me.get("data") if isinstance(me, dict) else None
+            remaining = finite(ud.get("quota"), -1.0) if isinstance(ud, dict) else -1.0
+            used = finite(ud.get("used_quota"), -1.0) if isinstance(ud, dict) else -1.0
+            if remaining >= 0 and used >= 0:
+                remaining /= 500000.0  # QuotaPerUnit
+                used /= 500000.0
+                return record(prov, configured=True, kind="balance",
+                              label=f"${remaining:.2f}", value=round(used, 2),
+                              currency="$",
+                              windows=[window("spend", "used", 0, used=used,
+                                              total=remaining + used, unit="$")],
+                              detail=(f"new-api · {data['system_name']}"
+                                      f" · used ${used:.2f}"
+                                      + today_part(used, "user")),
+                              spendScope="user", newapi=True)
+        except Exception:  # noqa: BLE001 — fall back to token level below
+            pass
+
+    # ---- token level (sk- billing endpoints) ------------------------------ #
     try:
         hdr = {"Authorization": "Bearer " + p["apiKey"]}
         sub = fetch_fixture(fx, "subscription") if _FIXTURES_DIR else \
@@ -942,23 +1010,21 @@ def fetch_newapi(ctx: dict) -> dict | None:
     lifetime = finite(usg.get("total_usage") if isinstance(usg, dict) else None,
                       0.0) / 100.0
     cap = finite(sub.get("hard_limit_usd") if isinstance(sub, dict) else None, 0.0)
-    cap = cap if 0 < cap < 10_000_000 else None  # 1e8 = new-api "unlimited"
-    today = _gateway_spent_today(ctx, p["id"], lifetime)
+    uncapped = not (0 < cap < 10_000_000)  # 1e8 = new-api "unlimited"
     parts = ["new-api · " + data["system_name"]]
-    if today is not None:
-        parts.append(f"${today:.2f} today")
-    if cap is not None:
+    if uncapped:
+        # 1e8 only happens on the token branch (source: billing.go), so the
+        # figure is the token's spend, not the account's.
+        parts.append("token only" + (" · user fetch failed" if cred else ""))
+    if not uncapped:
         parts.append(f"${lifetime:.2f} of ${cap:.0f}")
-    prov = dict(p)
-    prov["name"] = data["system_name"]
-    words = data["system_name"].split()
-    prov["display"] = ("".join(w[0] for w in words[:2]).upper() or p["display"])[:2]
-    windows = ([window("spend", "life", 0, used=lifetime, total=cap, unit="$")]
-               if cap is not None else [])
+    detail = " · ".join(parts) + today_part(lifetime, "token")
+    windows = ([] if uncapped else
+               [window("spend", "life", 0, used=lifetime, total=cap, unit="$")])
     return record(prov, configured=True, kind="balance",
                   label=f"${lifetime:.2f}", value=round(lifetime, 2),
-                  currency="$", windows=windows, detail=" · ".join(parts),
-                  newapi=True)
+                  currency="$", windows=windows, detail=detail,
+                  spendScope="token", newapi=True)
 
 
 QUOTA_ADAPTERS = {
@@ -1345,8 +1411,8 @@ def scan_opencode(ctx: dict, models: dict, days: DayIndex, dtok: list, dreq: lis
     return {"source": "opencode", "requests": n, "models": sorted(seen)}
 
 
-LOCAL_SCANNERS = (scan_opencode, scan_claude, scan_codex, scan_qwen, scan_omp)
 
+LOCAL_SCANNERS = (scan_opencode, scan_claude, scan_codex, scan_qwen, scan_omp)
 
 def scan_local_slot(scanner, ctx: dict, days: DayIndex):
     """One scanner against private accumulators; safe to run in a process
@@ -1433,7 +1499,8 @@ def update_history(ctx: dict, now: int, local: dict, providers: list) -> list:
         spend: dict = {}
         for p in providers:
             if p.get("newapi") and p.get("value") is not None:
-                spend[p["id"]] = round(finite(p["value"], 0.0), 2)
+                spend[p["id"]] = {"usd": round(finite(p["value"], 0.0), 2),
+                                  "scope": p.get("spendScope") or "token"}
         day = {"tokens": local.get("todayTokens", 0),
                "requests": local.get("todayRequests", 0),
                "caps": caps}
