@@ -803,9 +803,11 @@ def fetch_qwen(ctx: dict) -> dict:
 # speaks the new-api console API. The OpenAI-compatible billing endpoints
 # report lifetime spend (total_usage, US cents) and quota (hard_limit_usd =
 # remaining + used = TOTAL per controller/billing.go; new-api's
-# "unlimited" sentinel is 1e8). With DisplayTokenStatEnabled off — the
-# agentrouter case, verified live — both figures are USER-level (account
-# spend), not per-token; token-stat sites scope them to the calling token.
+# "unlimited" sentinel is 1e8). Token-stat sites (agentrouter: the 1e8
+# subscription is the unlimited-TOKEN sentinel, verified against the
+# dashboard — $40.60 token vs $47.82 account) scope both figures to the
+# calling token, hiding the account's real quota; the account view comes
+# from /api/user/self (see fetch_newapi).
 # Sites can also render CNY or raw-token display types (QuotaDisplayType):
 # the "$" here assumes the USD default agentrouter uses. Some forks
 # ignore the billing date params (agentrouter: disjoint windows return
@@ -973,6 +975,7 @@ def fetch_newapi(ctx: dict) -> dict | None:
 
     # ---- user level (dashboard numbers) ---------------------------------- #
     cred = _newapi_user_credential(ctx, p)
+    user_armed = cred is not None
     if cred is not None:
         try:
             hdr = {"Authorization": "Bearer " + cred[0],
@@ -1015,7 +1018,7 @@ def fetch_newapi(ctx: dict) -> dict | None:
     if uncapped:
         # 1e8 only happens on the token branch (source: billing.go), so the
         # figure is the token's spend, not the account's.
-        parts.append("token only" + (" · user fetch failed" if cred else ""))
+        parts.append("token only" + (" · user fetch failed" if user_armed else ""))
     if not uncapped:
         parts.append(f"${lifetime:.2f} of ${cap:.0f}")
     detail = " · ".join(parts) + today_part(lifetime, "token")

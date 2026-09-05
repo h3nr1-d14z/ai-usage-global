@@ -96,9 +96,9 @@ Any OMP provider whose host speaks the [QuantumNous/new-api](https://github.com/
 picked up automatically: `~/.omp/agent/models.yml` provides the `baseUrl`
 and the key (an env-name entry resolves against `~/.omp/agent/.env`, the
 file OMP itself loads — a literal `apiKey:` works too). The widget calls the
-gateway's OpenAI-compatible billing endpoints and shows the account's
-**lifetime spend** (`total_usage`, US cents; user-level on Agent Router —
-token-scoped only on sites that enable token stats) plus a per-day figure
+gateway's OpenAI-compatible billing endpoints and shows the tracked
+**lifetime spend** (`total_usage`, US cents; token-scoped on Agent Router —
+the annotation says "token only" there) plus a per-day figure
 derived from the persisted history snapshots — the first day seeds
 silently, the "$ today" line appears from day two. Quota-capped gateways
 additionally get a spend meter (against `hard_limit_usd` = remaining +
@@ -106,6 +106,14 @@ used = total); new-api's "unlimited" sentinel (`1e8`) renders as uncapped.
 Some forks ignore the billing date params (Agent Router does), which is why
 the engine treats the figure as lifetime-cumulative. Hosts that fail the
 `/api/status` signature check (or aren't new-api at all) drop out silently.
+
+**Account view (optional):** on token-stat sites the sk- key only sees the
+one token's spend. With `<ID>_ACCESS_TOKEN` and `<ID>_USER_ID` (e.g.
+`AGENTROUTER_ACCESS_TOKEN` / `AGENTROUTER_USER_ID`, from the dashboard's
+Personal Settings → access token + numeric user ID) the block upgrades to
+the dashboard's account numbers: balance as the headline, used in the
+detail, and a used-of-total meter. Store them the same way as any key:
+`printf '…\n' | python3 engine/usage.py --add-key AGENTROUTER_ACCESS_TOKEN`.
 
 ## Settings (`omarchy bar set h3nr1.d14z.ai-usage <key> <value>`)
 

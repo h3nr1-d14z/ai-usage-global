@@ -66,20 +66,31 @@ plans, plus a local-cost plane. Two layers, deliberately separated:
 - Billing: `GET /v1/dashboard/billing/subscription` (`hard_limit_usd` =
   remaining + used = TOTAL per controller/billing.go; `1e8` = new-api
   "unlimited" sentinel → uncapped) and `.../usage`
-  (`total_usage` = lifetime US cents; user-level on agentrouter —
-  token-scoped only on sites that enable token stats). **Date params are
+  (`total_usage` = lifetime US cents; **token-scoped on agentrouter** —
+  the 1e8 subscription is the unlimited-TOKEN sentinel, proven by the
+  dashboard: $40.60 token vs $47.82 account). **Date params are
   ignored by agentrouter's fork** (disjoint windows return identical sums,
   verified 2026-09-05) → the figure is lifetime-cumulative; today's spend
   = lifetime − yesterday's history snapshot (`_gateway_spent_today`,
   rotation/missing baseline → unknown, never negative). First day seeds
   silently.
-- Rendering: `kind:"balance"`, `label="$37.93"`, `value=lifetime` (drives
-  tone at $70/$90), detail `"new-api · <system_name> · $X today"`. No
-  Panel.qml changes were needed. Key NEVER enters the document
-  (test-asserted, incl. literal-key and env-name paths).
-- Corpus v9: models.yml + `.omp/agent/.env` fixtures (agentrouter = gateway,
-  trollllm = non-new-api drop, qwen = static-id skip), three billing
-  fixtures, manifest `expected.newapi` golden, engine-state wipe in
+- Rendering (token level): `kind:"balance"`, `label="$37.93"`,
+  `value=lifetime` (drives tone at $70/$90), detail `"new-api · <name> ·
+  token only · $X today"`. Key NEVER enters the document (test-asserted,
+  incl. literal-key and env-name paths). No Panel.qml changes were needed.
+- User level (dashboard numbers): `AGENTROUTER_ACCESS_TOKEN` +
+  `AGENTROUTER_USER_ID` (panel env store, both stored 2026-09-05 — PAT
+  pasted by the user, uid 44499 from the username slug, UNCONFIRMED) →
+  `GET /api/user/self` with the fork-required `New-Api-User` header →
+  quota/used_quota ÷ 500000 (QuotaPerUnit) → balance label + used detail
+  + used-of-total meter, `spendScope:"user"`. Any failure (incl. the
+  Aliyun WAF that challenges /api/user/* — flag earned by probing, cools
+  down) falls back to token level annotated `· user fetch failed` when
+  the upgrade was armed. History snapshots are `{usd, scope}`-tagged;
+  today-diffs only within a scope.
+- Corpus v9-v11: models.yml + `.omp/agent/.env` fixtures (agentrouter =
+  gateway, trollllm = non-new-api drop, qwen = static-id skip), billing +
+  user fixtures, manifest `expected.newapi` golden, engine-state wipe in
   make_corpus (stale history would drift day-relative goldens).
 
 ### Cost plane

@@ -177,6 +177,13 @@ def main() -> int:
                                           "sk-fixtured-trollllm-key",
                                           "sk-literal-qwen-fixture")))
 
+        # user fixture with bad shape (no quota fields) → annotated fallback
+        fxbad = make_fixtures(tmp / "fxbad", user={"success": True, "data": {}})
+        doc = run_engine(make_home(tmp / "h6b"), fxbad, CRED)
+        check("bad-shaped user response → token fallback annotated",
+              gw_of(doc)["detail"] == "new-api · Fixture Router · token only · user fetch failed",
+              gw_of(doc)["detail"])
+
         # 2) user-level upgrade: PAT + uid → dashboard numbers -------------- #
         fxu = make_fixtures(tmp / "fxu", user=USER_FIXTURE)
         doc = run_engine(make_home(tmp / "h2"), fxu, CRED)
