@@ -165,9 +165,14 @@ def main() -> int:
               json.dumps(rec))
         ids = [p["id"] for p in doc["providers"]]
         check("static registry intact, gateway appended last",
-              ids[-1] == "agentrouter" and len(ids) == 8, str(ids))
-        check("non-new-api host dropped (trollllm)",
-              not any(p["id"].startswith("trollllm") for p in doc["providers"]))
+              ids[-1] == "agentrouter" and len(ids) == 9, str(ids))
+        tl = next(p for p in doc["providers"] if p["id"] == "trollllm")
+        check("non-new-api host dropped; trollllm is the static record",
+              not any(p["id"] == "trollllm-anthropic"
+                      for p in doc["providers"])
+              and ids.count("trollllm") == 1
+              and tl["keyEnv"] == "TROLLLLM_COOKIE"
+              and tl["error"] == "no-cookie", str(tl.get("error")))
         check("host dedup: one spawn per host", ids.count("agentrouter") == 1)
         check("static-id collision skipped (one qwen)",
               ids.count("qwen") == 1)
@@ -301,7 +306,7 @@ def main() -> int:
         # no models.yml at all → no gateway, static plane untouched
         doc = run_engine(make_home(tmp / "h17", models_yml=None), fx)
         check("no models.yml → no gateway",
-              gw_of(doc) is None and len(doc["providers"]) == 7)
+              gw_of(doc) is None and len(doc["providers"]) == 8)
 
         # 6) capped gateway -------------------------------------------------------- #
         fx5 = make_fixtures(tmp / "fx5", cap=50)

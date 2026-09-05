@@ -1029,6 +1029,75 @@ def fetch_newapi(ctx: dict) -> dict | None:
                   currency="$", windows=windows, detail=detail,
                   spendScope="token", newapi=True)
 
+TROLLLLM_DASHBOARD = "https://trollllm.xyz"
+TROLLLLM_BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/139.0.0.0 Safari/537.36")
+
+
+def fetch_trollllm(ctx: dict) -> dict:
+    """TrollLLM (chat.trollllm.xyz gateway; Vietnamese reseller) — two
+    ledgers, both from the dashboard API at trollllm.xyz: a subscription
+    plan whose credits reset daily (planDailyAllocation, e.g. lite = 50)
+    and a PAYG credit wallet (purchased credits never expire; promotional
+    resources can — every batch carries its own expiry). 1 credit =
+    $0.01 USD, so figures stay in credits, the unit the dashboard shows.
+
+    The gateway exposes no quota endpoints for sk- keys (dashboard routes
+    are session-only and /api/login sits behind Cloudflare Turnstile), so
+    the credential is the browser session cookie (TROLLLLM_COOKIE): used
+    for the two GETs, never stored in the document. Expired cookie →
+    fetch-failed (re-paste); missing → the panel's paste row takes over."""
+    p = ctx["provider"]
+    cookie = _ENV.get("TROLLLLM_COOKIE", "").strip()
+    if not cookie:
+        return record(p, error="no-cookie")
+    hdr = {"Cookie": cookie, "User-Agent": TROLLLLM_BROWSER_UA,
+           "Referer": TROLLLLM_DASHBOARD + "/dashboard"}
+    try:
+        me = fetch_fixture("trollllm", "me") if _FIXTURES_DIR else \
+            fetch_json(TROLLLLM_DASHBOARD + "/api/user/me", hdr)
+        res = fetch_fixture("trollllm", "resources") if _FIXTURES_DIR else \
+            fetch_json(TROLLLLM_DASHBOARD + "/api/user/credit-resources", hdr)
+    except Exception:  # noqa: BLE001 — network down or session expired
+        return record(p, error="fetch-failed")
+    if not (isinstance(me, dict) and isinstance(res, dict)):
+        return record(p, error="fetch-failed")
+    alloc = finite(me.get("planDailyAllocation"), 0.0)
+    used = finite(me.get("planDailyUsed"), 0.0)
+    wallet = finite(res.get("totalRemaining"), -1.0)
+    spent = finite(res.get("totalUsed"), -1.0)
+    if min(alloc, used, wallet, spent) < 0:
+        return record(p, error="fetch-failed")
+    # Daily reset: planDailyResetDate anchors the wall-clock instant but
+    # can lag into the past (observed live); roll forward to the next one.
+    reset = parse_ts_ms(me.get("planDailyResetDate"))
+    while reset is not None and reset <= ctx["nowMs"]:
+        reset += 24 * 3600_000
+    windows = []
+    if alloc > 0:
+        windows.append(window("plan", "daily", 24 * 3600_000, used=used,
+                              total=alloc, unit="cr", resets_at_ms=reset))
+    if wallet + spent > 0:  # wallet depletion, the gauge the site shows
+        windows.append(window("payg", "wallet", 0, used=spent,
+                              total=wallet + spent, unit="cr"))
+    if not windows:
+        return record(p, error="fetch-failed")
+    if alloc > 0:
+        label = f"{max(alloc - used, 0.0):.1f} cr"
+        pct = used / alloc * 100.0
+    else:  # pure PAYG account: the wallet is the headline
+        label = f"{wallet:.2f} cr"
+        pct = spent / (wallet + spent) * 100.0
+    tier = me.get("tier") if isinstance(me.get("tier"), str) else ""
+    parts = []
+    if alloc > 0:
+        parts += [tier or "plan", f"daily {used:.2f}/{alloc:.0f} cr"]
+    parts.append(f"wallet {wallet:.2f} cr")
+    return record(p, configured=True, kind="balance", label=label,
+                  value=round_up(clamp(pct, 0.0, 999.0), 1),
+                  windows=windows, detail=" · ".join(parts))
+
 
 QUOTA_ADAPTERS = {
     "opencode": fetch_opencode,
@@ -1038,6 +1107,7 @@ QUOTA_ADAPTERS = {
     "deepseek": fetch_deepseek,
     "copilot": fetch_copilot,
     "qwen": fetch_qwen,
+    "trollllm": fetch_trollllm,
 }
 
 # keyEnv: the credential the panel's "Add key" UI stores for this provider
@@ -1058,6 +1128,8 @@ PROVIDERS = [
      "keyEnv": "GITHUB_TOKEN"},
     {"id": "qwen", "name": "Qwen Coding Plan", "display": "AB",
      "keyEnv": "QWEN_PLAN_COOKIE"},
+    {"id": "trollllm", "name": "TrollLLM", "display": "TR",
+     "keyEnv": "TROLLLLM_COOKIE"},
 ]
 
 

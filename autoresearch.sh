@@ -14,8 +14,9 @@
 #   METRIC tokens_scanned / requests_scanned — workload invariants (must not move)
 #   METRIC output_bytes   — document size
 #
-# Correctness gate: validate + fallback + add-key + console suites must pass before
-# any timing is reported. Non-zero exit => checks_failed.
+# Correctness gate: validate + fallback + add-key + console + trollllm +
+# newapi suites must pass before any timing is reported. Non-zero exit =>
+# checks_failed.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -28,7 +29,7 @@ PY="${PYTHON:-python3}"
 
 # 2. Correctness gate — fail fast, never emit metrics on a broken engine.
 for t in tests/validate.py tests/test_sql_fallback.py tests/test_add_key.py \
-         tests/test_qwen_console.py tests/test_newapi.py; do
+         tests/test_qwen_console.py tests/test_trollllm.py tests/test_newapi.py; do
   if ! "$PY" "$t" >> bench/last-validation.log 2>&1; then
     echo "VALIDATION FAILED ($t) — see bench/last-validation.log" >&2
     tail -n 20 bench/last-validation.log >&2 || true

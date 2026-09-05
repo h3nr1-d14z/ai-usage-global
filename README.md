@@ -50,6 +50,7 @@ Providers appear as soon as their credential exists — no restart needed.
 | DeepSeek | `DEEPSEEK_API_KEY` | `~/.deepseek/config.toml` |
 | Copilot | `GITHUB_TOKEN` / `GH_TOKEN` | `~/.config/gh/hosts.yml` |
 | Qwen Coding Plan | (none — see below) | local transcripts |
+| TrollLLM | `TROLLLLM_COOKIE` (see below) | — |
 | New-API gateway | (auto — see below) | `~/.omp/agent/models.yml` + `~/.omp/agent/.env` |
 
 The engine reads credentials from, lowest to highest precedence:
@@ -89,6 +90,24 @@ session cookie, and that is what the widget uses when available:
 
 The cookie is a session credential: it is used for the two gateway requests
 and never written to the emitted document or logs (asserted by tests).
+
+### TrollLLM
+
+A Vietnamese reseller with **two ledgers**: a subscription plan whose
+credits reset daily (e.g. Lite = 50 credits/day) and a PAYG credit wallet
+(purchased credits never expire; promotional batches can — each carries
+its own expiry). 1 credit = $0.01 USD; the widget reports credits, the
+unit the dashboard itself shows.
+
+The API gateway (`chat.trollllm.xyz`) has **no quota endpoints for
+`sk-` keys** — the dashboard API at `trollllm.xyz` is session-only and
+`/api/login` sits behind Cloudflare Turnstile, so the credential is your
+browser session cookie: paste it into the TrollLLM row's key field
+(stored as `TROLLLLM_COOKIE`). Get it from the dashboard's DevTools →
+any `/api/user/…` request → `cookie:` header. When the cookie expires the
+row shows a fetch error — paste a fresh one; it is used for the two
+dashboard GETs and never written to the emitted document or logs
+(asserted by tests).
 
 ### New-API gateways (Agent Router & friends)
 

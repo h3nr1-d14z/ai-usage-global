@@ -97,9 +97,9 @@ def main() -> int:
     # ---- structure ---------------------------------------------------------- #
     providers = doc.get("providers", [])
     ids = [p["id"] for p in providers]
-    check("8 providers, ordered",
+    check("9 providers, ordered",
           ids == ["opencode", "openrouter", "kimi", "zai", "deepseek", "copilot",
-                  "qwen", "agentrouter"],
+                  "qwen", "trollllm", "agentrouter"],
           str(ids))
     required = {"id", "name", "display", "configured", "kind", "label", "value",
                 "currency", "detail", "windows", "error"}
@@ -112,7 +112,8 @@ def main() -> int:
         "opencode": "OPENCODE_GO_API_KEY", "openrouter": "OPENROUTER_API_KEY",
         "kimi": "KIMI_API_KEY", "zai": "ZAI_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY", "copilot": "GITHUB_TOKEN",
-        "qwen": "QWEN_PLAN_COOKIE", "agentrouter": "AGENTROUTER_API_KEY"},
+        "qwen": "QWEN_PLAN_COOKIE", "trollllm": "TROLLLLM_COOKIE",
+        "agentrouter": "AGENTROUTER_API_KEY"},
         str(keyenv))
     iso_re = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
     windows_ok = all(
@@ -259,18 +260,23 @@ def main() -> int:
           and hist[-1]["tokens"] == local.get("todayTokens"),
           str(hist[-1]) if isinstance(hist, list) and hist else "none")
 
-    # ---- new-api gateway ------------------------------------------------------ #
-    # Golden record from the manifest; trollllm proves both the host-dedup
-    # skip and the "not new-api → drop" path (no status fixture); the spend
-    # snapshot proves update_history persists gateway lifetime for
-    # tomorrow's today-figure.
+    # ---- new-api gateway + trollllm ------------------------------------------- #
+    # Golden records from the manifest. trollllm-anthropic proves the "not
+    # new-api → drop" path (no status fixture); trollllm itself is the
+    # cookie-fed static record (never a gateway). The spend snapshot proves
+    # update_history persists gateway lifetime for tomorrow's today-figure.
     gw = next((p for p in providers if p.get("id") == "agentrouter"), None)
     gw_exp = corpus["expected"].get("newapi")
     check("newapi gateway golden (agentrouter)", gw == gw_exp,
           f"{gw} vs {gw_exp}")
-    check("newapi non-gateway hosts dropped",
-          not any(p.get("id") in ("trollllm", "trollllm-anthropic")
-                  for p in providers))
+    tl = next((p for p in providers if p.get("id") == "trollllm"), None)
+    tl_exp = corpus["expected"].get("trollllm")
+    check("trollllm golden (dual ledger, cookie-fed)", tl == tl_exp,
+          f"{tl} vs {tl_exp}")
+    check("trollllm is the static record, never a gateway",
+          tl is not None and not tl.get("newapi"))
+    check("non-gateway host dropped (trollllm-anthropic)",
+          not any(p.get("id") == "trollllm-anthropic" for p in providers))
     try:
         state = json.loads((CORPUS / "home/.local/state/h3nr1.d14z.ai-usage"
                             "/history.json").read_text(encoding="utf-8"))
@@ -291,7 +297,8 @@ def main() -> int:
                        "oc-env-key", "sk-or-env-key", "sk-kimi-env-key",
                        "sk-zai-env-key", "sk-ds-env-key", "gho_env_copilot_token",
                        "sk-fixtured-newapi-key", "sk-fixtured-trollllm-key",
-                       "sk-literal-qwen-fixture"]
+                       "sk-literal-qwen-fixture", "fx-clearance",
+                       "fx-jwt-admin"]
     leaked = [s for s in fixture_secrets if s in text]
     leak = re.search(r"(gho_[A-Za-z0-9]{10,}|sk-[A-Za-z0-9-]{10,})", text)
     check("no credential leakage in document", not leaked and leak is None,

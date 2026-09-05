@@ -40,7 +40,7 @@ from pathlib import Path
 # os.environ/tzset games — nothing can be silently overridden by the shell.
 UTC = dt.timezone.utc
 
-CORPUS_VERSION = 11  # v11: golden label/value/currency/windows restored
+CORPUS_VERSION = 12  # v12: trollllm static provider (dual ledger, cookie)
 
 # Fixed anchor: 2026-09-03T12:00:00Z. Pinned so window math is reproducible.
 FIXED_NOW_MS = int(dt.datetime(2026, 9, 3, 12, 0, 0, tzinfo=dt.timezone.utc)
@@ -470,10 +470,12 @@ def write_credentials(home: Path) -> None:
         '[default]\napi_key = "sk-fixtured-deepseek-key"\n', encoding="utf-8")
 
     # OMP provider registry: new-api gateway discovery input. agentrouter is
-    # the live gateway (env-name key resolved from OMP's own .env); trollllm
-    # shares a host with trollllm-anthropic (dedup) and is not new-api (no
-    # fixtures → dropped); qwen collides with the static quota registry
-    # (skipped, and its literal key must never leak into the document).
+    # the live gateway (env-name key resolved from OMP's own .env); qwen and
+    # trollllm collide with the static quota registry (skipped — trollllm's
+    # quota is dashboard-cookie-fed, not gateway billing — and qwen's
+    # literal key must never leak into the document); trollllm-anthropic
+    # stays a gateway candidate on the same host and is not new-api (no
+    # status fixture → dropped).
     agent = home / ".omp/agent"
     agent.mkdir(parents=True, exist_ok=True)
     (agent / "models.yml").write_text(
@@ -553,7 +555,9 @@ def write_fixtures(out: Path) -> None:
         "KIMI_API_KEY=sk-kimi-env-key\n"
         "ZAI_API_KEY=sk-zai-env-key\n"
         "DEEPSEEK_API_KEY=sk-ds-env-key\n"
-        "GITHUB_TOKEN=gho_env_copilot_token\n", encoding="utf-8")
+        "GITHUB_TOKEN=gho_env_copilot_token\n"
+        "TROLLLLM_COOKIE=cf_clearance=fx-clearance; admin_session=fx-jwt-admin; session_present=1\n",
+        encoding="utf-8")
 
     # new-api gateway (agentrouter): status signature + OpenAI-style billing
     # (total_usage is US cents; hard_limit_usd 1e8 = new-api's "unlimited").
@@ -566,6 +570,29 @@ def write_fixtures(out: Path) -> None:
           "system_hard_limit_usd": 100000000, "access_until": 0})
     dump("newapi-agentrouter.usage.json", {"object": "list",
                                            "total_usage": 3792.6399})
+
+    # trollllm dashboard (TROLLLLM_COOKIE session): plan daily credits +
+    # PAYG wallet — shapes source-verified against trollllm.xyz 2026-09-05.
+    dump("trollllm.me.json", {
+        "username": "fixture_user", "credits": 0, "creditsUsed": 0,
+        "refCredits": 0, "role": "user", "email": "fixture@trollllm.xyz",
+        "emailVerified": True, "creditPriority": "plan_first",
+        "autoResetPlanDailyEnabled": False, "tier": "lite",
+        "planDailyAllocation": 50, "planDailyUsed": 5.25,
+        "planDailyResetDate": iso_utc(FIXED_NOW_MS + 11 * 3600_000),
+        "planStartedAt": "2026-08-21T13:07:53.484Z",
+        "planExpiresAt": "2026-09-20T13:07:53.484Z",
+        "dailyResetHour": 23, "dailyResetMinute": 0})
+    dump("trollllm.resources.json", {
+        "totalRemaining": 12.5, "totalOriginal": 16.11, "totalUsed": 3.61,
+        "activeCount": 1,
+        "resources": [{"id": "fx1", "source": "purchased",
+                       "originalAmount": 16.11, "remainingAmount": 12.5,
+                       "usedAmount": 3.61, "currency": "USD",
+                       "startsAt": "2026-08-21T13:07:53.484Z",
+                       "expiresAt": None, "status": "active",
+                       "daysRemaining": None, "usagePercent": 22.4,
+                       "canExtend": False, "extendedAt": None}]})
 
 
 def main() -> int:
@@ -640,6 +667,25 @@ def main() -> int:
                 "windows": [],
                 "error": None, "keyEnv": "AGENTROUTER_API_KEY",
                 "spendScope": "token", "newapi": True,
+            },
+            # trollllm static record exactly as the engine emits it
+            # (fixture: lite plan 5.25/50 cr daily + 12.5 cr wallet with
+            # 3.61 lifetime spent; reset pinned 11h after the frozen now).
+            "trollllm": {
+                "id": "trollllm", "name": "TrollLLM", "display": "TR",
+                "configured": True, "kind": "balance", "label": "44.8 cr",
+                "value": 10.5, "currency": "",
+                "detail": "lite · daily 5.25/50 cr · wallet 12.50 cr",
+                "windows": [
+                    {"id": "plan", "label": "daily", "spanMs": 86400000,
+                     "percent": 10.5, "used": 5.25, "total": 50.0,
+                     "unit": "cr",
+                     "resetsAt": iso_utc(FIXED_NOW_MS + 11 * 3600_000)},
+                    {"id": "payg", "label": "wallet", "spanMs": 0,
+                     "percent": 22.4, "used": 3.61, "total": 16.11,
+                     "unit": "cr", "resetsAt": None},
+                ],
+                "error": None, "keyEnv": "TROLLLLM_COOKIE",
             },
         },
     }

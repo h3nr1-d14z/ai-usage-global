@@ -29,7 +29,7 @@ plans, plus a local-cost plane. Two layers, deliberately separated:
 | OpenRouter / Kimi / ZAI / DeepSeek / Alibaba | vendor quota APIs | `*_API_KEY` env |
 | Qwen Coding Plan | **console gateway** (real %) → **transcript census** fallback | cookie (see below) |
 | Cursor | local state.vscdb | auto-detected |
-| New-API gateways (Agent Router) | **billing endpoints** (lifetime $, US-cents `total_usage`) | models.yml env-name → `~/.omp/agent/.env` |
+| TrollLLM | **dashboard API** (dual ledger: plan daily credits + PAYG wallet) | session cookie (see below) |
 
 ### Qwen — the long saga, resolved
 
@@ -53,6 +53,33 @@ plans, plus a local-cost plane. Two layers, deliberately separated:
 - Gateway reset-time types are sloppy (epoch s, ms, numeric strings, ISO)
   — `_reset_ms()` tolerates all four; pinned by tests.
 
+
+### TrollLLM — dual ledger via dashboard cookie
+
+- `chat.trollllm.xyz` is the API gateway (OpenAI + native Anthropic faces,
+  browser UA required); **no quota endpoints for sk- keys** — dashboard
+  routes at `trollllm.xyz` are session-cookie-only and `POST /api/login`
+  requires a Cloudflare Turnstile token (self-login infeasible). Hence
+  `TROLLLLM_COOKIE` (panel paste row, qwen-console pattern): two GETs
+  (`/api/user/me`, `/api/user/credit-resources`), cookie never enters the
+  document (test-asserted). Expired → `fetch-failed` (re-paste); missing →
+  benign `no-cookie` + paste row.
+- **Units**: 1 credit = $0.01 USD (site's usage doc); figures stay in
+  credits — the unit the dashboard renders. **Ledgers**: plan
+  `planDailyUsed`/`planDailyAllocation` (tiers lite 50 / standard 100 /
+  plus 160 / premium 250 / … / elite 1800 cr per day; resets daily —
+  `planDailyResetDate` can lag into the past, engine rolls +24h to the
+  next occurrence) and PAYG wallet `totalUsed`/(`totalRemaining`+
+  `totalUsed`) — the depletion gauge the dashboard shows (purchased
+  credits never expire; promo resources do, per-batch `expiresAt`).
+  `creditPriority: plan_first` means plan credits burn first.
+- Rendering: `kind:"balance"`, `label` = plan credits remaining
+  (`"44.8 cr"`), `value` = plan used % (so the 70/90 bar-chip tone means
+  plan pressure), windows `plan` (daily meter + reset countdown) and
+  `payg` (wallet meter), detail `"lite · daily 5.25/50 cr · wallet
+  12.50 cr"`. Pure-PAYG accounts (no plan) headline the wallet instead.
+  Static registry entry (never a new-api gateway); OMP's
+  `trollllm-anthropic` twin still drops as a non-new-api host.
 
 ### New-API gateways — how it works
 
@@ -88,9 +115,10 @@ plans, plus a local-cost plane. Two layers, deliberately separated:
   down) falls back to token level annotated `· user fetch failed` when
   the upgrade was armed. History snapshots are `{usd, scope}`-tagged;
   today-diffs only within a scope.
-- Corpus v9-v11: models.yml + `.omp/agent/.env` fixtures (agentrouter =
-  gateway, trollllm = non-new-api drop, qwen = static-id skip), billing +
-  user fixtures, manifest `expected.newapi` golden, engine-state wipe in
+- Corpus v9-v12: models.yml + `.omp/agent/.env` fixtures (agentrouter =
+  gateway, trollllm-anthropic = non-new-api drop, qwen + trollllm =
+  static-id skips), billing + user + trollllm dashboard fixtures, manifest
+  `expected.newapi` / `expected.trollllm` goldens, engine-state wipe in
   make_corpus (stale history would drift day-relative goldens).
 
 ### Cost plane

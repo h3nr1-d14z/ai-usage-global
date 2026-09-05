@@ -149,7 +149,8 @@ Panel {
       zai: "key: z.ai console → API Keys",
       deepseek: "key: platform.deepseek.com → API Keys",
       copilot: "token: github.com → Developer settings → Personal access tokens",
-      qwen: "cookie: QwenCloud → DevTools → any request → copy the cookie: header"
+      qwen: "cookie: QwenCloud → DevTools → any request → copy the cookie: header",
+      trollllm: "cookie: trollllm.xyz → DevTools → any /api/user request → cookie: header"
     }
     return hints[p.id] || ""
   }
@@ -272,10 +273,11 @@ Panel {
           root.providers = data.providers || []
           root.checkCapAlerts(data.providers || [])
           root.local = data.local || {}
-          // no-key/no-token/no-local-store/no-local-usage are expected
-          // states for unconfigured providers; only real fetch failures
-          // get the banner.
-          var benign = ["no-key", "no-token", "no-local-store", "no-local-usage"]
+          // no-key/no-token/no-cookie/no-local-store/no-local-usage are
+          // expected states for unconfigured providers; only real fetch
+          // failures get the banner.
+          var benign = ["no-key", "no-token", "no-cookie", "no-local-store",
+                        "no-local-usage"]
           var real = (data.errors || []).filter(function (e) { return benign.indexOf(e) < 0 })
           root.errorText = real.length ? "some providers failed" : ""
         } catch (e) {
